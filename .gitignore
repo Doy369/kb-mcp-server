@@ -1,0 +1,18 @@
+# secrets
+.env
+runtime_config.json
+
+# local persistence (memory store dump; contains ingested KB content)
+kb_store.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# deps cache
+*.egg-info/
+
+# runtime logs
+*.log

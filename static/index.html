@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>知识库控制台 · KB MCP Server</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#fff; --ink:#1f2329; --muted:#8a9099;
+    --line:#e6e8eb; --brand:#2f6bff; --brand-soft:#eaf1ff;
+    --green:#1f9d55; --green-soft:#eefaf2; --amber:#c47f00; --amber-soft:#fff6e6;
+    --red:#d93535; --red-soft:#fdecec;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+    font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{padding:14px 24px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:18px;font-weight:650}
+  header .sub{color:var(--muted);font-size:12px;margin-top:4px}
+  .status{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .tag{background:var(--brand-soft);color:var(--brand);border:1px solid #d6e2ff;
+    padding:3px 10px;border-radius:999px;font-size:12px}
+  .tag.gray{background:#f0f1f3;color:var(--muted);border-color:var(--line)}
+  .tag.green{background:var(--green-soft);color:var(--green);border-color:#cdeedd}
+  .tag.amber{background:var(--amber-soft);color:var(--amber);border-color:#f1e0b8}
+  .layout{display:flex;height:100vh;overflow:hidden}
+  .sidebar{width:232px;flex:0 0 232px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;padding:18px 14px;height:100%;overflow:auto}
+  .sidebar .brand{font-size:17px;font-weight:700}
+  .sidebar .brand .sub{color:var(--muted);font-size:11.5px;font-weight:400;margin-top:3px;line-height:1.5}
+  .sidebar .status{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0 6px}
+  .sidebar nav{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+  .sidebar nav button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:transparent;border:0;border-radius:9px;padding:10px 12px;font:inherit;color:var(--muted);
+    cursor:pointer;font-weight:550}
+  .sidebar nav button:hover{background:#f2f4f7}
+  .sidebar nav button.active{background:var(--brand-soft);color:var(--brand);font-weight:650}
+  .sidebar .foot{margin-top:auto;color:var(--muted);font-size:11px;padding-top:14px;border-top:1px solid var(--line);line-height:1.6}
+  .content{flex:1;min-width:0;padding:18px 22px 22px;height:100%;overflow:auto}
+  .chatpanel{width:34%;min-width:300px;max-width:560px;flex:0 0 auto;background:var(--panel);
+    border-left:1px solid var(--line);display:flex;flex-direction:column;height:100%;overflow:hidden}
+  .chatpanel .chatwrap{height:100%;min-height:0;border:0;border-radius:0;background:transparent}
+  .resizer{width:6px;flex:0 0 6px;cursor:col-resize;background:transparent;position:relative;z-index:6}
+  .resizer:hover,.resizer.dragging{background:#d6e2ff}
+  @media (max-width:1100px){ .chatpanel{width:42%;min-width:280px} }
+  @media (max-width:760px){ .chatpanel{width:64%;min-width:240px} }
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+  .card.pad-top{border-radius:12px}
+  .card h2{margin:0 0 12px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .card h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--brand)}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],textarea,select{width:100%;border:1px solid var(--line);border-radius:8px;
+    padding:9px 11px;font:inherit;color:var(--ink);background:#fcfcfd;resize:vertical}
+  textarea{min-height:90px}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--brand);background:#fff}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:9px 16px;
+    font:inherit;font-weight:550;cursor:pointer}
+  button.ghost{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+  button.mini{background:#fff;color:var(--red);border:1px solid #f0c4c4;padding:4px 10px;font-size:12px}
+  button:hover{filter:brightness(.97)}
+  .btn-sm{padding:6px 12px;font-size:13px}
+  .spacer{flex:1}
+  .hint{color:var(--muted);font-size:12px}
+  .hidden{display:none}
+  .result{margin-top:12px}
+  .hit{border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:10px;background:#fcfcfd}
+  .hit .top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .hit .doc{font-size:12px;color:var(--brand);font-weight:600}
+  .hit .score{margin-left:auto;font-size:12px;color:var(--muted)}
+  .bar{height:6px;border-radius:4px;background:#eef0f3;overflow:hidden;margin-top:6px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,#2f6bff,#5b8bff)}
+  .hit .content{font-size:13px;color:#33383f;white-space:pre-wrap;margin-top:6px}
+  mark{background:#fff2a8;padding:0 1px;border-radius:3px}
+  .src{font-size:12px;color:var(--muted);margin-top:8px}
+  .src b{color:var(--brand)}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  .doclist{max-height:min(360px,42vh);overflow:auto}
+  .docrow{display:flex;gap:10px;align-items:center;padding:9px 10px;border:1px solid var(--line);
+    border-radius:10px;margin-bottom:8px;background:#fcfcfd}
+  .docrow .meta{min-width:0;flex:1}
+  .docrow .meta .id{font-weight:600;font-size:13px;color:var(--brand)}
+  .docrow .meta .pv{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--brand-soft);color:var(--brand)}
+  .card-live{border-left:3px solid var(--green);background:var(--green-soft);border-radius:10px;
+    padding:11px 12px;margin-top:10px;font-size:13px}
+  .card-live .ttl{font-weight:600;color:var(--green);margin-bottom:6px;font-size:12px}
+  .live-item{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .live-item .k{color:var(--muted);min-width:54px}
+  .mockbadge{font-size:10px;background:#fff;border:1px solid #cdeedd;color:var(--green);
+    border-radius:999px;padding:1px 6px;margin-left:6px}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#f0f1f3;color:var(--muted)}
+  .pill.high{background:var(--green-soft);color:var(--green)}
+  .pill.mid{background:var(--amber-soft);color:var(--amber)}
+  .pill.low{background:var(--red-soft);color:var(--red)}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .metric{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fcfcfd}
+  .metric .n{font-size:20px;font-weight:700;color:var(--brand)}
+  .metric .l{font-size:12px;color:var(--muted)}
+  .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  /* 窄屏单列时：知识库页把「文档管理」置顶，批量提交后无需滚动即可看到入库结果 */
+  @media (max-width:1320px){
+    #tab-kb .grid2 > div:last-child{order:-1}
+  }
+
+  /* ===== 对话窗口 ===== */
+  .chatwrap{display:flex;flex-direction:column;height:calc(100vh - 100px);min-height:480px}
+  .chat-top{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .chat-top .title{font-weight:600;font-size:14px}
+  .chat-ctx{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 10px;
+    background:var(--brand-soft);border:1px solid #d6e2ff;border-radius:10px;margin-bottom:10px}
+  .chat-ctx label{margin:0;color:var(--brand);font-weight:600}
+  .chat-ctx input{width:150px}
+  .chat-msgs{flex:1;overflow:auto;padding:6px 4px;display:flex;flex-direction:column;gap:14px}
+  .msg{display:flex;gap:10px;align-items:flex-start;max-width:100%}
+  .msg.user{flex-direction:row-reverse}
+  .avatar{width:34px;height:34px;border-radius:10px;flex:0 0 34px;display:flex;align-items:center;
+    justify-content:center;font-size:12px;font-weight:700;color:#fff;background:var(--brand)}
+  .avatar.you{background:#9aa3ad}
+  .bubble{max-width:78%;background:#f2f4f7;border:1px solid var(--line);border-radius:12px;
+    padding:11px 13px;font-size:13.5px;color:#24292f;white-space:pre-wrap;word-break:break-word}
+  .msg.user .bubble{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .msg.user .bubble .ctx-note{font-size:11px;opacity:.85;margin-top:5px;display:block}
+  .msg.bot .btext{white-space:pre-wrap}
+  .msg.bot .src{margin-top:8px}
+  .msg.bot .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .typing{display:flex;gap:5px;padding:6px 2px}
+  .typing i{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block;
+    animation:blink 1.2s infinite both}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+  .chat-input{display:flex;gap:10px;align-items:flex-end;margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+  .chat-input textarea{min-height:46px;max-height:140px}
+  .welcome{background:#fcfcfd;border:1px dashed var(--line);border-radius:12px;padding:16px;color:#33383f}
+  .welcome .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer;color:var(--brand)}
+  .chip:hover{background:var(--brand-soft)}
+  .banner{border:1px solid #f1e0b8;background:var(--amber-soft);color:var(--amber);
+    border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">知识库控制台<div class="sub">KB MCP Server · 可调用外部 API 的知识库</div></div>
+    <div class="status" id="status"><span class="tag gray">加载中…</span></div>
+    <nav>
+      <button data-view="kb" class="active">📚 知识库</button>
+      <button data-view="search">🔍 检索 · 指标</button>
+      <button data-view="config">⚙ 接口配置</button>
+    </nav>
+    <div class="foot">本地私有化 · 离线可跑<br>存储 / 嵌入可切换</div>
+  </aside>
+
+  <main class="content">
+  <!-- ============ 知识库 ============ -->
+  <section id="tab-kb" class="card pad-top">
+    <div class="grid2">
+      <div>
+        <h2><span class="dot"></span>知识摄取</h2>
+        <label>文档 ID</label>
+        <input type="text" id="docId" placeholder="如 faq_returns" />
+        <label>文档内容（自动切片 + 本地嵌入）</label>
+        <textarea id="docText" placeholder="粘贴一段知识库文本…"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button id="ingestBtn">提交入库</button>
+          <button class="ghost btn-sm" id="sampleBtn">载入示例 FAQ</button>
+          <span class="spacer"></span>
+          <span class="hint" id="ingestHint"></span>
+        </div>
+        <div style="margin-top:16px;border-top:1px dashed var(--line);padding-top:14px">
+          <h2><span class="dot"></span>批量提交（文件夹 / 文件）</h2>
+          <div class="row">
+            <button class="ghost btn-sm" id="pickFolderBtn">选择文件夹</button>
+            <button class="ghost btn-sm" id="pickFilesBtn">选择文件</button>
+            <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
+            <input type="file" id="filesInput" multiple hidden />
+          </div>
+          <div class="row" style="margin-top:8px">
+            <input type="text" id="folderPath" placeholder="或输入文件夹绝对路径，如 D:/docs/kb" style="flex:1" />
+            <button id="importPathBtn">按路径导入</button>
+          </div>
+          <div class="hint" id="batchHint" style="margin-top:6px">支持 .md/.txt/.docx（.pdf 需后端 pypdf）。选文件夹走浏览器上传；填路径走服务端扫描。</div>
+          <div class="doclist" id="batchList" style="margin-top:8px;max-height:170px"></div>
+        </div>
+      </div>
+      <div>
+        <h2><span class="dot"></span>文档管理 <span class="spacer"></span>
+          <button class="ghost btn-sm" id="docRefresh">刷新</button></h2>
+        <div class="doclist" id="docList"><div class="empty">暂无文档，请先摄取。</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 检索 · 指标 ============ -->
+  <section id="tab-search" class="card pad-top hidden">
+    <div class="grid2">
+      <div>
+        <h2><span class="dot"></span>混合检索</h2>
+        <label>检索问题</label>
+        <input type="text" id="q" placeholder="如：退货退款要几天？" />
+        <div class="row" style="margin-top:10px">
+          <label style="margin:0">Top-K</label>
+          <input type="text" id="topk" value="3" style="width:60px" />
+          <label style="margin:0 0 0 10px">模式</label>
+          <select id="mode" style="width:110px">
+            <option value="hybrid">混合</option>
+            <option value="vector">向量</option>
+          </select>
+          <button id="searchBtn">检索</button>
+          <span class="spacer"></span>
+          <span class="hint" id="searchHint"></span>
+        </div>
+        <div class="result" id="searchResult"><div class="empty">输入问题开始检索。</div></div>
+      </div>
+      <div>
+        <h2><span class="dot"></span>调用指标 <span class="spacer"></span>
+          <button class="ghost btn-sm" id="metricsBtn">刷新</button></h2>
+        <div class="metrics" id="metrics">
+          <div class="metric"><div class="n" id="mTotal">–</div><div class="l">总请求</div></div>
+          <div class="metric"><div class="n" id="mAsk">–</div><div class="l">问答(含实时)</div></div>
+          <div class="metric"><div class="n" id="mErr">–</div><div class="l">错误</div></div>
+          <div class="metric"><div class="n" id="mUp">–</div><div class="l">运行时长(s)</div></div>
+        </div>
+        <div class="src" id="mEp" style="margin-top:10px"></div>
+      </div>
+    </div>
+  </section>
+  <!-- ============ 接口配置 ============ -->
+  <section id="tab-config" class="card pad-top hidden">
+    <div class="grid2">
+      <div>
+        <h2><span class="dot"></span>接口配置（两步搞定）</h2>
+        <div class="banner">只需做两件事：① 让助手能查你公司的订单 / 库存（没有也可先用演示数据）；② 让回答更自然（可选）。全部保存即生效，不用改任何代码。</div>
+
+        <!-- 步骤① 公司系统 -->
+        <h2 style="margin-top:16px"><span class="dot"></span>① 连接公司系统（查订单 / 库存）</h2>
+        <label>你现在有真实订单 / 库存系统吗？</label>
+        <select id="KB_API_MOCK">
+          <option value="1">还没有，先用「演示数据」试试（推荐先这样）</option>
+          <option value="0">有，我要连接真实系统</option>
+        </select>
+
+        <div id="liveBlock">
+          <p class="hint" style="margin-top:8px">把公司系统地址填下面，然后点【测试连接】，系统会自动认出「订单状态 / 承运商 / 到达时间」对应哪个字段——你不用懂代码。</p>
+          <label>订单系统地址</label>
+          <input type="text" id="KB_ORDER_API_URL" placeholder="如 http://订单系统地址 或 https://..." />
+          <label>订单号写在地址里的位置（一般不用改）</label>
+          <input type="text" id="KB_ORDER_PATH_TPL" placeholder="/orders/{id}" />
+          <label>库存系统地址</label>
+          <input type="text" id="KB_INVENTORY_API_URL" placeholder="如 http://库存系统地址" />
+          <label>SKU 写在地址里的位置（一般不用改）</label>
+          <input type="text" id="KB_INVENTORY_PATH_TPL" placeholder="/inventory/{id}" />
+
+          <details class="cfg-adv" style="margin-top:12px">
+            <summary>登录验证（大多数系统需要，点开填）</summary>
+            <div style="padding-top:10px">
+              <label>验证方式</label>
+              <select id="KB_API_AUTH_SCHEME">
+                <option value="bearer">账号令牌（最常见，选这个）</option>
+                <option value="header">自定义请求头</option>
+                <option value="query">网址里带参数</option>
+              </select>
+              <label>令牌 / Key（你公司系统给的）</label>
+              <input type="text" id="KB_API_KEY" placeholder="留空保持不变" autocomplete="off" />
+              <label>令牌头名称（仅「自定义请求头」时填）</label>
+              <input type="text" id="KB_API_AUTH_HEADER" placeholder="如 X-Api-Key" />
+              <label>令牌参数名（仅「网址参数」时填）</label>
+              <input type="text" id="KB_API_AUTH_QUERY" placeholder="如 apikey" />
+              <div class="row" style="margin-top:8px">
+                <div style="flex:1"><label>超时(秒)</label><input type="text" id="KB_API_TIMEOUT" value="5" /></div>
+                <div style="flex:1"><label>缓存(秒)</label><input type="text" id="KB_API_TTL" value="30" /></div>
+              </div>
+            </div>
+          </details>
+
+          <div class="row" style="margin-top:12px">
+            <div style="flex:1"><label>测试用订单号</label><input type="text" id="KB_ORDER_TEST_ID" placeholder="你公司一个真实订单号" /></div>
+            <div style="flex:1"><label>测试用 SKU</label><input type="text" id="KB_INVENTORY_TEST_SKU" placeholder="如 SKU-A100" /></div>
+          </div>
+          <!-- 字段映射由“测试连接”自动写入，文职无需手填，保留为隐藏输入供保存使用 -->
+          <input type="hidden" id="KB_ORDER_STATUS_PATH" />
+          <input type="hidden" id="KB_ORDER_CARRIER_PATH" />
+          <input type="hidden" id="KB_ORDER_ETA_PATH" />
+          <input type="hidden" id="KB_INVENTORY_STOCK_PATH" />
+          <input type="hidden" id="KB_INVENTORY_WAREHOUSE_PATH" />
+          <button id="cfgTest" style="margin-top:12px">测试连接并自动识别字段</button>
+          <div id="cfgTestResult" class="doclist" style="margin-top:10px"><div class="empty">点上面按钮，系统会连一次你的系统并显示结果。</div></div>
+        </div>
+
+        <!-- 步骤② 模型 -->
+        <h2 style="margin-top:18px"><span class="dot"></span>② AI 智能回答（可选，更自然）</h2>
+        <p class="hint">不填也能用：助手会自动从知识库里摘取原文回答。想让回答更通顺自然，接一个大模型即可。</p>
+        <div class="row" style="margin:8px 0">
+          <button class="ghost btn-sm" id="useDeepseek">一键用 DeepSeek</button>
+          <button class="ghost btn-sm" id="useOpenai">OpenAI / 通义</button>
+          <button class="ghost btn-sm" id="useOllama">本地 Ollama</button>
+        </div>
+        <label>用哪个模型服务</label>
+        <select id="KB_LLM_PROVIDER">
+          <option value="none">都不用（从知识库摘原文回答）</option>
+          <option value="openai">DeepSeek / OpenAI / 通义等</option>
+          <option value="ollama">本地 Ollama</option>
+        </select>
+        <label>模型名称</label>
+        <input type="text" id="KB_LLM_MODEL" placeholder="如 deepseek-chat" />
+        <label>接口地址</label>
+        <input type="text" id="KB_LLM_BASE_URL" placeholder="如 https://api.deepseek.com/v1" />
+        <label>API Key（模型平台给的密钥）</label>
+        <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" />
+
+        <div class="row" style="margin-top:16px">
+          <button id="cfgSave">保存并应用</button>
+          <span class="spacer"></span>
+          <span class="hint" id="cfgHint"></span>
+        </div>
+      </div>
+
+      <div>
+        <h2><span class="dot"></span>当前连接状态</h2>
+        <div id="cfgAdapters" class="doclist"><div class="empty">加载中…</div></div>
+        <h2 style="margin-top:14px"><span class="dot"></span>怎么用（三步）</h2>
+        <div class="welcome" style="font-size:12.5px;line-height:1.8">
+          <b>第一步</b>：在①里选「先用演示数据」，直接点【保存并应用】，助手就能答通用问题。<br>
+          <b>第二步</b>：有真实系统时，选「连接真实系统」，填地址 →【测试连接并自动识别字段】→ 在下拉里选好字段 →【采用所选字段并保存】。<br>
+          <b>第三步</b>：想更自然，在②点【一键用 DeepSeek】，粘贴 key，保存。保存后到右侧对话窗发一句「你好」即可验证是否接通。
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+  <div class="resizer" id="chatResizer" title="拖动调整对话窗口宽度"></div>
+
+  <!-- ============ 对话窗口（右侧独立面板） ============ -->
+  <aside class="chatpanel">
+  <section id="tab-chat" class="card chatwrap">
+    <div class="chat-top">
+      <span class="title">💬 对话窗口</span>
+      <span class="spacer"></span>
+      <button class="ghost btn-sm" id="loadSampleChat">载入示例知识</button>
+      <button class="ghost btn-sm" id="newChat">新对话</button>
+    </div>
+    <div class="chat-ctx">
+      <label>订单号</label><input type="text" id="ctxOrder" placeholder="如 SO20260827" />
+      <label>SKU</label><input type="text" id="ctxSku" placeholder="如 SKU-A100" />
+      <span class="hint">上下文应用于本轮对话所有问题（留空按问题意图提示实时数据）</span>
+    </div>
+    <div class="chat-msgs" id="chatMsgs"></div>
+    <div class="chat-input">
+      <textarea id="chatIn" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"></textarea>
+      <button id="chatSend">发送</button>
+    </div>
+  </section>
+  </aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+async function refreshStatus(){
+  const s = await (await fetch('/api/status')).json();
+  $('status').innerHTML =
+    `<span class="tag">存储：${s.backend}</span>` +
+    `<span class="tag">嵌入：${s.embedding}</span>` +
+    `<span class="tag ${s.llm_enabled?'green':'gray'}">LLM合成：${s.llm_enabled?'开':'关'}</span>` +
+    `<span class="tag gray">已索引：${s.count}</span>` +
+    `<span class="tag ${s.auth_required?'amber':'gray'}">鉴权：${s.auth_required?'开':'关'}</span>` +
+    `<span class="tag gray">限流：${s.rate_limit||'关'}</span>`;
+  if(s.count === 0 && !window.__sampleOffered){
+    showBanner();
+  }
+}
+
+async function refreshDocs(){
+  const docs = await (await fetch('/api/docs')).json();
+  if(!docs.length){ $('docList').innerHTML = '<div class="empty">暂无文档，请先摄取。</div>'; return; }
+  $('docList').innerHTML = docs.map(d => `
+    <div class="docrow">
+      <div class="meta">
+        <div class="id">${esc(d.doc_id)}</div>
+        <div class="pv">${esc(d.preview||'')}</div>
+      </div>
+      <span class="badge">${d.chunks} 片段</span>
+      <button class="mini" onclick="delDoc('${esc(d.doc_id)}')">删除</button>
+    </div>`).join('');
+}
+window.delDoc = async (id) => {
+  if(!confirm('确认删除文档 '+id+' ？')) return;
+  await fetch('/api/delete_doc',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({doc_id:id})});
+  refreshDocs(); refreshStatus();
+};
+
+function hlTerms(query){
+  const pieces = query.split(/[\s,，。？!?、]+/).filter(t=>t.length>=2);
+  const bigrams = []; const q = query.replace(/\s+/g,'');
+  for(let i=0;i<q.length-1;i++) bigrams.push(q.slice(i,i+2));
+  return Array.from(new Set([...pieces, ...bigrams]));
+}
+function highlight(content, query){
+  let s = esc(content);
+  for(const t of hlTerms(query)){
+    const et = esc(t);
+    if(et && s.includes(et)) s = s.split(et).join('<mark>'+et+'</mark>');
+  }
+  return s;
+}
+function renderHits(hits, query){
+  if(!hits.length) return '<div class="empty">无匹配片段。</div>';
+  return hits.map(h=>{
+    const pct = Math.max(4, Math.round((h.score||0)*100));
+    return `<div class="hit">
+      <div class="top"><span class="doc">${esc(h.doc_id)}</span>
+        <span class="score">相似度 ${(h.score||0).toFixed(3)}</span></div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="content">${highlight(h.content, query)}</div>
+    </div>`;
+  }).join('');
+}
+
+$('ingestBtn').onclick = async () => {
+  const doc_id = $('docId').value.trim();
+  const text = $('docText').value.trim();
+  if(!text){ $('ingestHint').textContent='请先填写内容'; return; }
+  const j = await (await fetch('/api/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({doc_id, text})})).json();
+  $('ingestHint').textContent = `已入库 ${j.chunks} 个片段（${j.doc_id}）`;
+  $('docId').value=''; $('docText').value='';
+  refreshStatus(); refreshDocs();
+};
+$('sampleBtn').onclick = async () => {
+  const j = await (await fetch('/api/sample',{method:'POST'})).json();
+  $('ingestHint').textContent = `已载入 ${j.ingested} 篇示例，共 ${j.count} 片段`;
+  refreshStatus(); refreshDocs();
+  hideBanner();
+};
+$('docRefresh').onclick = refreshDocs;
+
+$('searchBtn').onclick = async () => {
+  const query = $('q').value.trim(); if(!query) return;
+  const top_k = parseInt($('topk').value||'3',10);
+  const mode = $('mode').value;
+  const hits = await (await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({query, top_k, mode})})).json();
+  $('searchResult').innerHTML = renderHits(hits, query);
+  $('searchHint').textContent = `命中 ${hits.length} 条`;
+};
+
+async function refreshMetrics(){
+  const m = await (await fetch('/api/metrics')).json();
+  $('mTotal').textContent = m.requests_total;
+  $('mAsk').textContent = m.asks_with_live;
+  $('mErr').textContent = m.errors;
+  $('mUp').textContent = m.uptime_s;
+  $('mEp').textContent = '端点：' + Object.entries(m.by_endpoint||{}).map(([k,v])=>`${k}:${v}`).join('  ');
+}
+$('metricsBtn').onclick = refreshMetrics;
+
+function renderLive(cards){
+  if(!cards || !cards.length) return '';
+  const items = cards.map(c=>{
+    if(c.type==='order') return `<div class="live-item"><span class="k">订单</span>
+      <span>${esc(c.order_id)} → <b>${esc(c.status)}</b>（${esc(c.carrier)} 预计 ${esc(c.eta)}）</span>
+      ${c.mock?'<span class="mockbadge">mock</span>':''}</div>`;
+    if(c.type==='inventory') return `<div class="live-item"><span class="k">库存</span>
+      <span>SKU ${esc(c.sku)} → <b>${esc(c.stock)}</b>（${esc(c.warehouse)}）</span>
+      ${c.mock?'<span class="mockbadge">mock</span>':''}</div>`;
+    if(c.type==='prompt') return `<div class="live-item"><span class="k">提示</span>
+      <span>${esc(c.adapter)}：${esc(c.note)}</span></div>`;
+    return '';
+  }).join('');
+  return `<div class="card-live"><div class="ttl">实时数据</div>${items}</div>`;
+}
+
+// ===== 对话窗口 =====
+let turns = [];   // {role:'user'|'assistant', content}
+function showBanner(){
+  if($('chatBanner')) return;
+  const b = document.createElement('div');
+  b.className='banner'; b.id='chatBanner';
+  b.innerHTML = '知识库为空，对话可能无召回。<button class="ghost btn-sm" onclick="loadSampleChat()">载入示例</button>';
+  $('chatMsgs').prepend(b);
+}
+function hideBanner(){ const b=$('chatBanner'); if(b) b.remove(); }
+async function loadSampleChat(){
+  const j = await (await fetch('/api/sample',{method:'POST'})).json();
+  refreshStatus(); refreshDocs(); hideBanner();
+  addBot(`已载入 ${j.ingested} 篇示例 FAQ（退货/发票/物流/账号），现在可以开始对话了。`, {system:true});
+}
+
+function welcome(){
+  $('chatMsgs').innerHTML = '';
+  const w = document.createElement('div');
+  w.className='welcome';
+  w.innerHTML = `👋 我是知识库助手。你可以直接提问，我会检索知识库并（按需）调用外部 API 返回实时数据。<br>
+    试试下面的问题，或在上方填入「订单号 / SKU」后提问以获取实时数据：
+    <div class="chips">
+      <span class="chip" data-q="退货退款要几天">退货退款要几天</span>
+      <span class="chip" data-q="怎么开发票">怎么开发票</span>
+      <span class="chip" data-q="物流多久发货">物流多久发货</span>
+      <span class="chip" data-q="我的订单到哪了">我的订单到哪了</span>
+      <span class="chip" data-q="SKU-A100 还有货吗">SKU-A100 还有货吗</span>
+    </div>`;
+  $('chatMsgs').appendChild(w);
+  w.querySelectorAll('.chip').forEach(c=> c.onclick = ()=>{ $('chatIn').value=c.dataset.q; sendChat(); });
+}
+
+function addUser(text, ctx){
+  turns.push({role:'user', content:text});
+  const note = (ctx.order_id||ctx.sku) ? `<span class="ctx-note">📦 ${ctx.order_id?('订单 '+ctx.order_id):''}${ctx.sku?(' · SKU '+ctx.sku):''}</span>` : '';
+  const m = document.createElement('div');
+  m.className='msg user';
+  m.innerHTML = `<div class="bubble">${esc(text)}${note}</div><div class="avatar you">我</div>`;
+  $('chatMsgs').appendChild(m);
+  scrollChat();
+}
+function addBot(answer, j){
+  const isSys = j && j.system;
+  if(isSys){
+    const m = document.createElement('div');
+    m.className='msg bot';
+    m.innerHTML = `<div class="avatar">KB</div><div class="bubble"><div class="btext">${esc(answer)}</div></div>`;
+    $('chatMsgs').appendChild(m); scrollChat(); return;
+  }
+  turns.push({role:'assistant', content:answer});
+  const conf = j.confidence?.label==='高'?'high':j.confidence?.label==='中'?'mid':'low';
+  const m = document.createElement('div');
+  m.className='msg bot';
+  m.innerHTML = `<div class="avatar">KB</div><div class="bubble">
+      <div class="btext">${esc(answer)}</div>
+      ${renderLive(j.live_cards)}
+      <div class="src">来源：${(j.sources||[]).map(s=>`<b>${esc(s.doc_id)}</b>(${s.score})`).join(' · ')||'无'}</div>
+      <div class="meta">
+        <span class="pill ${conf}">置信度 ${j.confidence?.label||'–'}</span>
+        <span class="pill">合成 ${j.synthesis_method||'–'}</span>
+        <span class="pill code">trace ${esc(j.trace_id||'')}</span>
+        <span class="pill">${j._ms||''}ms</span>
+      </div>
+    </div>`;
+  $('chatMsgs').appendChild(m);
+  scrollChat();
+}
+function typing(on){
+  let t = $('typing');
+  if(on){
+    if(!t){ t=document.createElement('div'); t.id='typing'; t.className='msg bot';
+      t.innerHTML='<div class="avatar">KB</div><div class="bubble"><div class="typing"><i></i><i></i><i></i></div></div>';
+      $('chatMsgs').appendChild(t); scrollChat(); }
+  } else if(t){ t.remove(); }
+}
+function scrollChat(){ const c=$('chatMsgs'); c.scrollTop=c.scrollHeight; }
+
+async function sendChat(){
+  const q = $('chatIn').value.trim(); if(!q) return;
+  $('chatIn').value='';
+  const ctx = { order_id:$('ctxOrder').value.trim(), sku:$('ctxSku').value.trim() };
+  addUser(q, ctx);
+  typing(true);
+  const t0 = performance.now();
+  const history = turns.filter(t=>t.role==='user'||t.role==='assistant').slice(-8)
+                       .map(t=>({role:t.role, content:t.content}));
+  let j;
+  try{
+    j = await (await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({question:q, top_k:3, order_id:ctx.order_id||null, sku:ctx.sku||null, history})})).json();
+  }catch(e){ j = {answer:'请求失败：'+e, sources:[], live_cards:[], confidence:{label:'低'}, synthesis_method:'error', trace_id:'-'}; }
+  typing(false);
+  j._ms = Math.round(performance.now()-t0);
+  addBot(j.answer, j);
+}
+
+$('chatSend').onclick = sendChat;
+$('chatIn').addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendChat(); }
+});
+$('newChat').onclick = ()=>{ turns=[]; welcome(); };
+$('loadSampleChat').onclick = loadSampleChat;
+
+// ===== 侧边栏视图切换 =====
+document.querySelectorAll('.sidebar nav button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('.sidebar nav button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    const tab = b.dataset.view;
+    ['kb','search','config'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
+    if(tab==='config'){ loadConfig(); }
+  };
+});
+
+// ===== 接口配置面板（傻瓜化）=====
+const CFG_FIELDS = [
+  "KB_API_MOCK","KB_API_KEY","KB_API_AUTH_SCHEME","KB_API_AUTH_HEADER","KB_API_AUTH_QUERY",
+  "KB_API_TIMEOUT","KB_API_TTL",
+  "KB_ORDER_API_URL","KB_ORDER_PATH_TPL","KB_ORDER_STATUS_PATH","KB_ORDER_CARRIER_PATH","KB_ORDER_ETA_PATH","KB_ORDER_TEST_ID",
+  "KB_INVENTORY_API_URL","KB_INVENTORY_PATH_TPL","KB_INVENTORY_STOCK_PATH","KB_INVENTORY_WAREHOUSE_PATH","KB_INVENTORY_TEST_SKU",
+  "KB_LLM_PROVIDER","KB_LLM_MODEL","KB_LLM_BASE_URL","KB_LLM_API_KEY"
+];
+let _cfgKeySet = false, _llmKeySet = false;
+
+function cfgCollect(skipEmptyKey){
+  const body = {};
+  for(const k of CFG_FIELDS){
+    if((k==="KB_API_KEY" || k==="KB_LLM_API_KEY") && skipEmptyKey) continue;
+    body[k] = $(k).value.trim();
+  }
+  body.KB_LLM_ENABLED = ($('KB_LLM_PROVIDER').value === "none") ? "0" : "1";
+  return body;
+}
+function renderCfgAdapters(list){
+  if(!list || !list.length){ $('cfgAdapters').innerHTML='<div class="empty">无适配器</div>'; return; }
+  $('cfgAdapters').innerHTML = list.map(a=>{
+    const live = a.mode==='live';
+    return `<div class="docrow"><div class="meta">
+      <div class="id">${esc(a.name)}</div>
+      <div class="pv">${esc(a.base_url||'(未配置 URL)')} ${esc(a.path_tpl||'')}</div>
+    </div><span class="badge" style="${live?'background:var(--green-soft);color:var(--green)':'background:#f0f1f3;color:var(--muted)'}">${live?'真实':'模拟'}</span></div>`;
+  }).join('');
+}
+function toggleLive(){
+  $('liveBlock').style.display = ($('KB_API_MOCK').value === "0") ? "block" : "none";
+}
+async function loadConfig(){
+  const j = await (await fetch('/api/config')).json();
+  for(const k of CFG_FIELDS){
+    if(k==="KB_API_KEY" || k==="KB_LLM_API_KEY"){ continue; }
+    if($(k)) $(k).value = j[k]!==undefined ? j[k] : "";
+  }
+  _cfgKeySet = !!j._key_set;
+  _llmKeySet = !!j._llm_key_set;
+  $('KB_API_KEY').placeholder = _cfgKeySet ? "已设置（留空保持不变）" : "输入 token";
+  $('KB_LLM_API_KEY').placeholder = _llmKeySet ? "已设置（留空保持不变）" : "输入 key（可选）";
+  if(j.KB_LLM_PROVIDER){ $('KB_LLM_PROVIDER').value = j.KB_LLM_PROVIDER; }
+  else { $('KB_LLM_PROVIDER').value = (j.KB_LLM_ENABLED==="1"||j.KB_LLM_ENABLED===true) ? "openai" : "none"; }
+  renderCfgAdapters(j._adapters);
+  toggleLive();
+}
+$('cfgSave').onclick = async ()=>{
+  $('cfgHint').textContent = '保存中…';
+  const body = cfgCollect(true);
+  if(!_cfgKeySet && $('KB_API_KEY').value.trim()!==""){
+    body.KB_API_KEY = $('KB_API_KEY').value.trim();
+  }
+  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
+    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
+  }
+  const j = await (await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)})).json();
+  $('cfgHint').textContent = j.ok ? '已保存并应用 ✓' : '保存失败';
+  renderCfgAdapters(j.live_apis);
+  refreshStatus();
+  setTimeout(()=>{ $('cfgHint').textContent=''; }, 2500);
+};
+$('cfgTest').onclick = async ()=>{
+  $('cfgHint').textContent = '连接测试中…';
+  const body = cfgCollect(true);
+  if(!_cfgKeySet && $('KB_API_KEY').value.trim()!==""){
+    body.KB_API_KEY = $('KB_API_KEY').value.trim();
+  }
+  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
+    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
+  }
+  let j;
+  try{ j = await (await fetch('/api/config/test',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)})).json(); }
+  catch(e){ $('cfgHint').textContent='请求失败：'+e; return; }
+  renderCfgAdapters(j._adapters || j.adapters);
+  const rows = (j.adapters||[]).map(a=>{
+    if(!a.live){
+      return `<div class="docrow"><div class="meta"><div class="id">${esc(a.adapter)}</div>
+        <div class="pv">演示模式：未连接真实系统（在①选“连接真实系统”后填地址即可测）</div></div>
+        <span class="badge" style="background:#f0f1f3;color:var(--muted)">演示</span></div>`;
+    }
+    if(!a.ok){
+      return `<div class="docrow" style="border-color:#f0c4c4"><div class="meta"><div class="id" style="color:var(--red)">${esc(a.adapter)} 没连上</div>
+        <div class="pv">${esc(a.url||'')}<br>${esc(a.error||'连接失败')}<br>请检查地址、令牌、网络后重试</div></div>
+        <span class="badge" style="background:var(--red-soft);color:var(--red)">失败</span></div>`;
+    }
+    const fields = a.fields || [];
+    const sel = (id,label)=>`<label style="margin-top:8px">${label}</label>
+      <select id="${id}" style="max-width:340px"><option value="">— 没有这项 —</option>
+      ${fields.map(f=>`<option value="${esc(f)}">${esc(f)}</option>`).join('')}</select>`;
+    const block = a.adapter==='order_status' ? `
+       ${sel('wiz_order_status','哪一项是【订单状态】？')}
+       ${sel('wiz_order_carrier','哪一项是【承运商 / 快递】？')}
+       ${sel('wiz_order_eta','哪一项是【预计到达时间】？')}
+       <button class="btn-sm" style="margin-top:10px" onclick="applyFieldMap('order_status')">采用所选字段并保存</button>` : `
+       ${sel('wiz_inv_stock','哪一项是【库存数量】？')}
+       ${sel('wiz_inv_warehouse','哪一项是【仓库】？')}
+       <button class="btn-sm" style="margin-top:10px" onclick="applyFieldMap('inventory')">采用所选字段并保存</button>`;
+    const preview = esc(JSON.stringify(a.raw_preview||{}, null, 2));
+    return `<div class="wiz" style="border:1px solid var(--green);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--green-soft)">
+      <div class="docrow" style="background:transparent;border:0"><div class="meta">
+        <div class="id" style="color:var(--green)">✅ ${esc(a.adapter)} 接对了</div>
+        <div class="pv">${esc(a.url||'')}</div></div></div>
+      <details style="margin:6px 0"><summary class="ts">查看系统返回的原始数据</summary>
+        <pre class="code" style="white-space:pre-wrap;max-height:160px;overflow:auto">${preview}</pre></details>
+      <p class="hint">请在下面下拉里选出各项对应的字段，不用懂代码：</p>
+      ${block}
+    </div>`;
+  });
+  $('cfgTestResult').innerHTML = rows.join('') || '<div class="empty">无结果</div>';
+  $('cfgHint').textContent = '';
+};
+
+// 模型提供商切换：自动填默认值
+$('KB_LLM_PROVIDER').onchange = ()=>{
+  const p = $('KB_LLM_PROVIDER').value;
+  if(p === "none") return;
+  if(!$('KB_LLM_BASE_URL').value){
+    $('KB_LLM_BASE_URL').value = (p === "ollama") ? "http://localhost:11434/v1" : "https://api.openai.com/v1";
+  }
+  if(!$('KB_LLM_MODEL').value){
+    $('KB_LLM_MODEL').value = (p === "ollama") ? "qwen2.5:7b" : "gpt-4o-mini";
+  }
+};
+
+// 演示模式开关 → 显示 / 隐藏真实系统配置块
+$('KB_API_MOCK').onchange = toggleLive;
+
+// 一键场景模板：只填默认值，用户只需粘贴 Key
+function pickProvider(p){
+  $('KB_LLM_PROVIDER').value = 'openai';
+  if(p === 'ollama'){ $('KB_LLM_BASE_URL').value='http://localhost:11434/v1'; $('KB_LLM_MODEL').value='qwen2.5:7b'; }
+  else if(p === 'openai'){ $('KB_LLM_BASE_URL').value='https://api.openai.com/v1'; $('KB_LLM_MODEL').value='gpt-4o-mini'; }
+  else { $('KB_LLM_BASE_URL').value='https://api.deepseek.com/v1'; $('KB_LLM_MODEL').value='deepseek-chat'; }
+  $('KB_LLM_API_KEY').focus();
+  $('cfgHint').textContent = (p==='deepseek'?'已填 DeepSeek 默认项':'已填默认项') + '，粘贴 API Key 后点保存';
+}
+$('useDeepseek').onclick = ()=> pickProvider('deepseek');
+$('useOpenai').onclick = ()=> pickProvider('openai');
+$('useOllama').onclick = ()=> pickProvider('ollama');
+
+// 采用测试连接识别出的字段路径并保存（文职无需手写 JSON 路径）
+function applyFieldMap(name){
+  if(name === 'order_status'){
+    setIf('KB_ORDER_STATUS_PATH','wiz_order_status');
+    setIf('KB_ORDER_CARRIER_PATH','wiz_order_carrier');
+    setIf('KB_ORDER_ETA_PATH','wiz_order_eta');
+  } else {
+    setIf('KB_INVENTORY_STOCK_PATH','wiz_inv_stock');
+    setIf('KB_INVENTORY_WAREHOUSE_PATH','wiz_inv_warehouse');
+  }
+  $('cfgSave').click();
+}
+function setIf(fieldId, selId){
+  const v = $(selId).value;
+  if(v) $(fieldId).value = v;
+}
+
+// ===== 批量提交（文件夹 / 文件）=====
+const _B64CHUNK = 0x8000;
+function bytesToB64(buf){
+  const bytes = new Uint8Array(buf); let bin='';
+  for(let i=0;i<bytes.length;i+=_B64CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i,i+_B64CHUNK));
+  return btoa(bin);
+}
+async function uploadFiles(fileList){
+  const files = Array.from(fileList); if(!files.length) return;
+  $('batchList').innerHTML = `<div class="empty">上传中…（${files.length} 个文件）</div>`;
+  let ok=0, fail=0; const rows=[];
+  for(const f of files){
+    try{
+      const buf = await f.arrayBuffer();
+      const b64 = bytesToB64(buf);
+      const rel = f.webkitRelativePath || f.name;
+      const doc_id = rel.replace(/\.[^.]+$/,'').replace(/[\\/]/g,'_');
+      const j = await (await fetch('/api/ingest_file',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({filename:f.name, content:b64, doc_id})})).json();
+      rows.push(`<div class="docrow"><div class="meta"><div class="id">${esc(j.doc_id)}</div><div class="pv">${esc(f.name)} · ${j.chunks} 片段</div></div><span class="badge">OK</span></div>`); ok++;
+    }catch(e){
+      rows.push(`<div class="docrow"><div class="meta"><div class="id" style="color:var(--red)">${esc(f.name)}</div><div class="pv">失败</div></div><span class="badge" style="background:var(--red-soft);color:var(--red)">ERR</span></div>`); fail++;
+    }
+  }
+  $('batchList').innerHTML = rows.join('') || '<div class="empty">无文件</div>';
+  $('batchHint').textContent = `完成：成功 ${ok}，失败 ${fail}。已刷新文档列表。`;
+  refreshStatus(); refreshDocs();
+}
+$('pickFolderBtn').onclick = ()=> $('folderInput').click();
+$('pickFilesBtn').onclick = ()=> $('filesInput').click();
+$('folderInput').onchange = (e)=> uploadFiles(e.target.files);
+$('filesInput').onchange = (e)=> uploadFiles(e.target.files);
+$('importPathBtn').onclick = async ()=>{
+  const folder = $('folderPath').value.trim();
+  if(!folder){ $('batchHint').textContent='请先输入文件夹路径'; return; }
+  $('batchHint').textContent='扫描中…';
+  let j;
+  try{ j = await (await fetch('/api/ingest_folder',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({folder, recursive:true})})).json(); }
+  catch(e){ $('batchHint').textContent='请求失败：'+e; return; }
+  const rows = (j.results||[]).map(r=>`<div class="docrow"><div class="meta"><div class="id">${esc(r.doc_id)}</div><div class="pv">${esc(r.file)} · ${r.chunks} 片段</div></div><span class="badge">OK</span></div>`).join('');
+  const skips = (j.skipped||[]).map(s=>`<div class="docrow"><div class="meta"><div class="id" style="color:var(--red)">${esc(s.file)}</div><div class="pv">${esc(s.error)}</div></div><span class="badge" style="background:var(--red-soft);color:var(--red)">ERR</span></div>`).join('');
+  $('batchList').innerHTML = (rows+skips) || '<div class="empty">无匹配文件</div>';
+  $('batchHint').textContent = `扫描 ${j.scanned||0} 个文件，入库 ${j.ingested||0}，跳过 ${(j.skipped||[]).length}。`;
+  refreshStatus(); refreshDocs();
+};
+
+// ===== 对话窗口宽度拖拽 =====
+(function(){
+  const rz = $('chatResizer'); const panel = document.querySelector('.chatpanel');
+  if(!rz || !panel) return;
+  const saved = parseInt(localStorage.getItem('chatWidth')||'',10);
+  if(saved >= 240 && saved <= 640) panel.style.width = saved+'px';
+  let dragging=false;
+  rz.addEventListener('mousedown',(e)=>{ dragging=true; rz.classList.add('dragging'); document.body.style.cursor='col-resize'; e.preventDefault(); });
+  window.addEventListener('mousemove',(e)=>{
+    if(!dragging) return;
+    const rect = document.querySelector('.layout').getBoundingClientRect();
+    const w = Math.max(240, Math.min(640, rect.right - e.clientX));
+    panel.style.width = w+'px';
+  });
+  window.addEventListener('mouseup',()=>{
+    if(!dragging) return; dragging=false; rz.classList.remove('dragging'); document.body.style.cursor='';
+    const cur = parseInt(panel.style.width||'',10); if(cur) localStorage.setItem('chatWidth', cur);
+  });
+})();
+refreshStatus(); refreshDocs(); refreshMetrics(); welcome();
+setInterval(refreshMetrics, 5000);
+</script>
+</body>
+</html>
