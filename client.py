@@ -8,6 +8,7 @@ ThreadingHTTPServer，所有接口、配置向导、检索可视化都不变。
       通过 --add-data 把 static/、kb_store.json、runtime_config.json 一并带进去。
 """
 
+import ctypes
 import os
 import sys
 import shutil
@@ -66,6 +67,17 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
     # 4) 打开原生窗口，承载控制台
+    # 关键：在创建 WebView2 窗口前声明 DPI 感知。
+    # 否则在高 DPI / 缩放屏上，WebView2 控件会被压缩成一条窄缝，
+    # 只显示每行最右边的几个字、左侧整片白屏(就是你刚遇到的现象)。
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor Aware V2
+        except Exception:
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()  # 兜底
+            except Exception:
+                pass
     url = f"http://127.0.0.1:{port}/"
     webview.create_window(
         "企业客服知识库控制台",
