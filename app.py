@@ -16,14 +16,17 @@ P5 加固：
 import base64
 import json
 import os
+import shutil
+import sys
 import threading
 import time
 import uuid
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from kb_mcp_server.adapters import adapter_status, fetch_live, reload_adapters, self_check
-from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg
+from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, DATA_DIR
 from kb_mcp_server.embeddings import get_embedder
 from kb_mcp_server.ingestion import IngestionPipeline
 from kb_mcp_server.retrieval import HybridRetriever
@@ -39,7 +42,10 @@ _emb = get_embedder()
 _retriever = HybridRetriever(_store, _emb)
 _ingestor = IngestionPipeline(_store, _emb)
 
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if getattr(sys, "frozen", False):
+    STATIC_DIR = os.path.join(sys._MEIPASS, "static")
+else:
+    STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 # 前端「接口配置」面板管理的配置项（页面可写，持久化到 runtime_config.json，覆盖环境变量）
 API_CONFIG_KEYS = [
@@ -386,6 +392,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # exe 首跑播种：把打包内的默认数据(kb_store.json / runtime_config.json)复制到用户数据目录
+    if getattr(sys, "frozen", False) and DATA_DIR:
+        for _f in ("kb_store.json", "runtime_config.json"):
+            _src = os.path.join(sys._MEIPASS, _f)
+            _dst = os.path.join(DATA_DIR, _f)
+            if os.path.exists(_src) and not os.path.exists(_dst):
+                try:
+                    shutil.copyfile(_src, _dst)
+                except Exception:
+                    pass
+
     port = int(os.getenv("KB_WEB_PORT", "8000"))
     # 端口占用自检：避免重复启动多个实例导致内存存储/摄取互相看不到
     import socket as _sock
@@ -400,4 +417,9 @@ if __name__ == "__main__":
     auth = f" 鉴权=开(KB_API_TOKEN)" if settings.api_token else " 鉴权=关"
     rl = f" 限流={settings.rate_limit}/min" if settings.rate_limit else " 限流=关"
     print(f"知识库演示控制台已启动: http://localhost:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl})")
+    # 一键体验：自动打开默认浏览器
+    try:
+        webbrowser.open(f"http://localhost:{port}")
+    except Exception:
+        pass
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

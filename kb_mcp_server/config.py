@@ -1,15 +1,40 @@
 import json
 import os
+import sys
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-load_dotenv()
 
-# 运行时配置：从页面（/api/config）写入，持久化到项目根 runtime_config.json，
-# 运行时优先于环境变量；重启后保留。用于把外部 API 接口配置放到前端页面上。
+def _is_frozen() -> bool:
+    """是否被 PyInstaller 等工具冻结为可执行文件。"""
+    return getattr(sys, "frozen", False)
+
+
+def get_data_dir() -> str:
+    """exe 冻结模式下返回用户可写数据目录（%APPDATA%/kb-mcp-server）；
+    开发模式返回空串（沿用项目根）。"""
+    if _is_frozen():
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        d = os.path.join(base, "kb-mcp-server")
+        os.makedirs(d, exist_ok=True)
+        return d
+    return ""
+
+
+# exe 模式下所有运行时数据（kb_store.json / runtime_config.json / .env）落在用户目录，
+# 避免写进只读的临时解压目录导致重启即丢。
+DATA_DIR = get_data_dir()
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUNTIME_CONFIG_PATH = os.path.join(PROJECT_ROOT, "runtime_config.json")
+if DATA_DIR:
+    RUNTIME_CONFIG_PATH = os.path.join(DATA_DIR, "runtime_config.json")
+    _ENV_PATH = os.path.join(DATA_DIR, ".env")
+else:
+    RUNTIME_CONFIG_PATH = os.path.join(PROJECT_ROOT, "runtime_config.json")
+    _ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
+
+load_dotenv(dotenv_path=_ENV_PATH)
 
 _runtime_cfg: "dict | None" = None
 

@@ -16,3 +16,10 @@ venv/
 
 # runtime logs
 *.log
+
+# PyInstaller build artifacts (exe 二进制不进仓库)
+build/
+dist/
+*.spec
+kb-mcp-server.exe
+exe_test.log

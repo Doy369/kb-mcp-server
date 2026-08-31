@@ -12,13 +12,18 @@ import os
 import tempfile
 from abc import ABC, abstractmethod
 
-from kb_mcp_server.config import get_settings
+from kb_mcp_server.config import get_settings, DATA_DIR as _DATA_DIR
 
 
 # 内存存储的持久化文件（纯本地、离线、私有）；设 KB_MEM_STORE 可改路径
-_MEM_STORE_PATH = os.getenv("KB_MEM_STORE") or os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "kb_store.json",
+# exe 冻结模式下落到用户数据目录（_DATA_DIR），避免写只读临时解压目录
+_MEM_STORE_PATH = os.getenv("KB_MEM_STORE") or (
+    os.path.join(_DATA_DIR, "kb_store.json")
+    if _DATA_DIR
+    else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "kb_store.json",
+    )
 )
 
 
