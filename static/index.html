@@ -149,6 +149,8 @@
     <nav>
       <button data-view="kb" class="active">📚 知识库</button>
       <button data-view="search">🔍 检索 · 指标</button>
+      <button data-view="graph">🕸 知识图谱</button>
+      <button data-view="agents">🤝 Agent 协作</button>
       <button data-view="config">⚙ 接口配置</button>
     </nav>
     <div class="foot">本地私有化 · 离线可跑<br>存储 / 嵌入可切换</div>
@@ -228,6 +230,103 @@
       </div>
     </div>
   </section>
+  <!-- ============ 知识图谱 ============ -->
+  <section id="tab-graph" class="card pad-top hidden">
+    <div class="grid2">
+      <div>
+        <h2><span class="dot"></span>图谱概况 <span class="spacer"></span>
+          <button class="ghost btn-sm" id="graphRefresh">刷新</button>
+          <button class="ghost btn-sm" id="graphRebuild">重建图谱</button></h2>
+        <div class="metrics" id="graphMetrics">
+          <div class="metric"><div class="n" id="gNodes">–</div><div class="l">实体节点</div></div>
+          <div class="metric"><div class="n" id="gEdges">–</div><div class="l">关系边</div></div>
+          <div class="metric"><div class="n" id="gBackend">–</div><div class="l">图后端</div></div>
+          <div class="metric"><div class="n" id="gTypes">–</div><div class="l">实体类型</div></div>
+        </div>
+        <div class="src" id="graphByType" style="margin-top:10px"></div>
+        <div class="hint" id="graphHint" style="margin-top:6px">摄取文档时自动抽取三元组入图；换本体后可「重建图谱」。</div>
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+          <h2><span class="dot"></span>实体列表</h2>
+          <div class="row">
+            <select id="gTypeFilter" style="width:140px">
+              <option value="">全部类型</option>
+              <option value="IssueCategory">问题类别</option>
+              <option value="SLAClause">SLA 条款</option>
+              <option value="Solution">解决方案</option>
+              <option value="Product">产品</option>
+              <option value="RootCause">根因</option>
+              <option value="Ticket">工单</option>
+              <option value="Customer">客户</option>
+              <option value="Document">文档</option>
+            </select>
+            <input type="text" id="gNameFilter" placeholder="按名称筛选" style="flex:1" />
+            <button id="gEntityBtn">查询</button>
+          </div>
+          <div class="doclist" id="gEntityList" style="margin-top:8px;max-height:230px"><div class="empty">暂无实体</div></div>
+        </div>
+      </div>
+      <div>
+        <h2><span class="dot"></span>多跳查询（路径即证据）</h2>
+        <label>实体名称（点左侧实体可直接查询）</label>
+        <div class="row">
+          <input type="text" id="gEntity" placeholder="如 物流配送" style="flex:1" />
+          <select id="gDepth" style="width:80px">
+            <option value="1">1 跳</option>
+            <option value="2" selected>2 跳</option>
+            <option value="3">3 跳</option>
+          </select>
+          <select id="gDirection" style="width:84px">
+            <option value="out">出边</option>
+            <option value="in">入边</option>
+            <option value="both" selected>双向</option>
+          </select>
+          <button id="gQueryBtn">查询</button>
+        </div>
+        <div class="result" id="gQueryResult" style="margin-top:10px"><div class="empty">选择实体开始查询。</div></div>
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
+          <h2><span class="dot"></span>从问题展开（关系侧召回）</h2>
+          <div class="row">
+            <input type="text" id="gQuestion" placeholder="如：物流超时怎么赔偿" style="flex:1" />
+            <button id="gExpandBtn">展开</button>
+          </div>
+          <div class="result" id="gExpandResult" style="margin-top:8px"><div class="empty">输入问题，查看图谱召回的关系事实。</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Agent 协作 ============ -->
+  <section id="tab-agents" class="card pad-top hidden">
+    <div class="grid2">
+      <div>
+        <h2><span class="dot"></span>协作团队 <span class="spacer"></span>
+          <button class="ghost btn-sm" id="agentRefresh">刷新</button></h2>
+        <div class="hint" id="agentMode" style="margin-bottom:8px">编排模式：–</div>
+        <div class="doclist" id="agentList" style="max-height:300px"><div class="empty">加载中…</div></div>
+        <div class="hint" style="margin-top:8px">
+          编排：GraphBuilder（增量补图）→ [Retriever ∥ GraphReasoner ∥ LiveData] → Synthesizer。
+          模式由 KB_AGENT_MODE 决定（deterministic 零 LLM / llm 本地路由）。
+        </div>
+      </div>
+      <div>
+        <h2><span class="dot"></span>协作问答（带 agent 轨迹）</h2>
+        <label>问题</label>
+        <div class="row">
+          <input type="text" id="agQ" placeholder="如：物流配送超时怎么赔偿" style="flex:1"
+                 onkeydown="if(event.key==='Enter')agentAsk()" />
+          <button id="agAskBtn">提问</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <label style="margin:0">订单号（可选）</label>
+          <input type="text" id="agOrder" placeholder="SO123" style="width:110px" />
+          <label style="margin:0 0 0 10px">SKU（可选）</label>
+          <input type="text" id="agSku" placeholder="SKU-1" style="width:110px" />
+        </div>
+        <div class="result" id="agResult" style="margin-top:10px"><div class="empty">提问后查看 agent 轨迹与协作答复。</div></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 接口配置 ============ -->
   <section id="tab-config" class="card pad-top hidden">
     <div class="grid2">
@@ -585,10 +684,174 @@ document.querySelectorAll('.sidebar nav button').forEach(b=>{
     document.querySelectorAll('.sidebar nav button').forEach(x=>x.classList.remove('active'));
     b.classList.add('active');
     const tab = b.dataset.view;
-    ['kb','search','config'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
+    ['kb','search','config','graph','agents'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
     if(tab==='config'){ loadConfig(); }
+    if(tab==='graph'){ loadGraphStats(); loadGraphEntities(); }
+    if(tab==='agents'){ loadAgentStatus(); }
   };
 });
+
+// ===== 知识图谱面板（P6 · GraphRAG 关系层）=====
+async function gapi(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})});
+  return r.json();
+}
+function fmtPath(start, steps){
+  let cur = start; const out = [];
+  (steps||[]).forEach(s=>{
+    const nm = (s.node && s.node.name) || '?';
+    const rel = s.rel_label || s.rel || '';
+    out.push(s.direction==='in' ? `${nm} <--${rel}-- ${cur}` : `${cur} --${rel}--> ${nm}`);
+    cur = nm;
+  });
+  return out.join(' ; ');
+}
+async function loadGraphStats(){
+  const j = await gapi('/api/graph/stats');
+  if(!j.enabled){
+    $('gNodes').textContent = '–'; $('gEdges').textContent = '–';
+    $('gBackend').textContent = '关'; $('gTypes').textContent = '–';
+    $('graphByType').innerHTML = '<span class="hint">图谱未启用：' + esc(j.reason||'后端不可用') + '</span>';
+    return;
+  }
+  $('gNodes').textContent = j.nodes;
+  $('gEdges').textContent = j.edges;
+  $('gBackend').textContent = (j.backend === 'age') ? 'AGE' : '内存';
+  const bt = j.by_type || {};
+  $('gTypes').textContent = Object.keys(bt).length;
+  const on = (j.ontology && j.ontology.node_types) || {};
+  const br = j.by_relation || {};
+  $('graphByType').innerHTML =
+    Object.entries(bt).map(([k,v])=>`<span class="badge" style="margin:0 6px 6px 0">${esc(on[k]||k)} ${v}</span>`).join('')
+    + (Object.keys(br).length ? '<div class="hint" style="margin-top:4px">关系分布：'
+        + Object.entries(br).map(([k,v])=>`${esc(k)} ${v}`).join(' · ') + '</div>' : '');
+}
+async function loadGraphEntities(){
+  const j = await gapi('/api/graph/entities', {
+    node_type: $('gTypeFilter').value || null,
+    name: $('gNameFilter').value.trim(), limit: 30,
+  });
+  const list = Array.isArray(j) ? j : [];
+  $('gEntityList').innerHTML = list.length ? list.map(e=>{
+    const docs = (e.props && e.props.docs) ? ' · 出自 ' + e.props.docs.join('、') : '';
+    return `<div class="docrow" data-name="${esc(e.name)}" style="cursor:pointer">
+      <div class="meta"><div class="id">${esc(e.name)}</div>
+      <div class="pv">${esc(e.type_label||e.type)} · 关联 ${e.degree}${esc(docs)}</div></div>
+      <span class="badge">${e.degree}</span></div>`;
+  }).join('') : '<div class="empty">无匹配实体</div>';
+  $('gEntityList').querySelectorAll('.docrow').forEach(r=>{
+    r.onclick = ()=>{ $('gEntity').value = r.dataset.name; runGraphQuery(); };
+  });
+}
+async function runGraphQuery(){
+  const name = $('gEntity').value.trim();
+  if(!name) return;
+  const j = await gapi('/api/graph/query', {
+    entity: name, direction: $('gDirection').value,
+    depth: parseInt($('gDepth').value,10) || 2, limit: 20,
+  });
+  if(j.error || !j.entity){
+    $('gQueryResult').innerHTML = `<div class="empty">${esc(j.error || ('未找到实体：' + name))}</div>`;
+    return;
+  }
+  const nbs = j.neighbors || [];
+  $('gQueryResult').innerHTML = nbs.length ? nbs.map(n=>`<div class="docrow">
+      <div class="meta"><div class="id" style="font-size:12.5px">${esc(fmtPath(j.entity.name, n.path))}</div>
+      <div class="pv">${esc((n.node && n.node.type_label) || '')} · ${n.depth} 跳</div></div>
+      <span class="badge">${n.depth}</span></div>`).join('')
+    : '<div class="empty">该实体暂无关联</div>';
+}
+async function runGraphExpand(){
+  const q = $('gQuestion').value.trim();
+  if(!q) return;
+  const j = await gapi('/api/graph/expand', {query: q, depth: 2, limit: 12});
+  const facts = (j && j.facts) || [], ents = (j && j.entities) || [];
+  if(!facts.length){
+    $('gExpandResult').innerHTML = '<div class="empty">未召回关系事实：问题里没识别出图谱实体，或图为空。</div>';
+    return;
+  }
+  $('gExpandResult').innerHTML =
+    `<div class="hint" style="margin-bottom:6px">命中实体：${ents.map(e=>esc(e.name)+'('+esc(e.type_label)+')').join('、')}</div>` +
+    facts.map(f=>`<div class="docrow"><div class="meta">
+      <div class="id" style="font-size:12.5px">${esc(f.path)}</div></div>
+      <span class="badge">${f.depth}</span></div>`).join('');
+}
+$('graphRefresh').onclick = ()=>{ loadGraphStats(); loadGraphEntities(); };
+$('gEntityBtn').onclick = loadGraphEntities;
+$('gQueryBtn').onclick = runGraphQuery;
+$('gExpandBtn').onclick = runGraphExpand;
+$('graphRebuild').onclick = async ()=>{
+  $('graphHint').textContent = '重建中…';
+  const j = await gapi('/api/graph/rebuild');
+  $('graphHint').textContent = j.error
+    ? ('重建失败：' + j.error)
+    : `已重建：${j.docs} 篇文档，新增 ${j.added} 条关系，不合规丢弃 ${j.invalid}`;
+  loadGraphStats(); loadGraphEntities();
+};
+
+// ===== Agent 协作面板（P7）=====
+async function aapi(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})});
+  return r.json();
+}
+async function loadAgentStatus(){
+  const j = await aapi('/api/agent/status');
+  $('agentMode').textContent = '编排模式：' + (j.mode === 'llm' ? 'llm（本地路由）' : 'deterministic（固定流水线）');
+  const list = j.agents || [];
+  $('agentList').innerHTML = list.length ? list.map(a=>`<div class="docrow">
+      <div class="meta"><div class="id">${esc(a.name)}</div>
+      <div class="pv">${esc(a.description||a.role||'')}</div></div>
+      <span class="badge">${esc(a.role||'')}</span></div>`).join('')
+    : '<div class="empty">无 agent</div>';
+}
+function renderAgentTrace(trace){
+  if(!trace || !trace.length) return '';
+  const rows = trace.map(t=>{
+    const ok = t.ok !== false;
+    const dot = ok ? 'var(--green,#2e9e5b)' : '#d33';
+    return `<div class="docrow"><div class="meta">
+      <div class="id"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dot};margin-right:6px"></span>${esc(t.agent)}</div>
+      <div class="pv">${esc(t.summary||'')}</div></div>
+      <span class="badge">${t.ms||0}ms</span></div>`;
+  }).join('');
+  return `<div class="doclist" style="max-height:240px;margin-top:4px">${rows}</div>`;
+}
+async function agentAsk(){
+  const q = $('agQ').value.trim(); if(!q) return;
+  $('agAskBtn').disabled = true;
+  $('agResult').innerHTML = '<div class="empty">协作中…</div>';
+  const t0 = performance.now();
+  let j;
+  try{
+    j = await aapi('/api/agent/ask', {question: q, top_k: 3,
+      order_id: $('agOrder').value.trim() || null, sku: $('agSku').value.trim() || null});
+  }catch(e){
+    j = {answer:'请求失败：'+e, agents:{trace:[]}};
+  }
+  const ms = Math.round(performance.now()-t0);
+  $('agAskBtn').disabled = false;
+  const ag = j.agents || {};
+  const routing = ag.routing || {};
+  const conf = j.confidence?.label || '–';
+  const paths = j.graph_paths || [];
+  $('agResult').innerHTML = `
+    <div class="btext" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(j.answer||'(无答复)')}</div>
+    ${paths.length ? '<div class="src" style="margin-top:8px">关系路径：<br>' + paths.map(p=>esc(p)).join('<br>') + '</div>' : ''}
+    <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
+      <div class="hint">agent 轨迹（路由：${esc(routing.decision||'run_all')} · 总耗时 ${ag.total_ms||ms}ms）</div>
+      ${renderAgentTrace(ag.trace)}
+      <div class="meta" style="margin-top:8px">
+        <span class="pill ${conf==='高'?'high':conf==='中'?'mid':'low'}">置信度 ${conf}</span>
+        <span class="pill">合成 ${esc(j.synthesis_method||'–')}</span>
+        <span class="pill code">trace ${esc(j.trace_id||'')}</span>
+        <span class="pill">${ms}ms</span>
+      </div>
+    </div>`;
+}
+$('agentRefresh').onclick = loadAgentStatus;
+$('agAskBtn').onclick = agentAsk;
 
 // ===== 接口配置面板（傻瓜化）=====
 const CFG_FIELDS = [

@@ -46,6 +46,12 @@ class Settings(BaseModel):
     # Postgres + pgvector 连接串（仅 pgvector 后端需要）
     database_url: str = os.getenv("KB_DATABASE_URL", "postgresql://kb:kb@localhost:5432/kb")
 
+    # 图谱后端（P6 · GraphRAG 关系增强层）：
+    #   memory：纯 Python 内存图 + JSON 落盘，离线零依赖
+    #   age   ：Postgres + Apache AGE，与 pgvector 同库；不可用时自动回退 memory
+    graph_backend: str = os.getenv("KB_GRAPH_BACKEND", "memory")
+    graph_enabled: bool = os.getenv("KB_GRAPH_ENABLED", "1").lower() in ("1", "true", "yes")
+
     # 嵌入后端：bge（sentence-transformers 本地模型）| dev（纯 Python 离线条目哈希嵌入，仅开发验证）
     embedding_backend: str = os.getenv("KB_EMBEDDING_BACKEND", "dev")
     embedding_model: str = os.getenv("KB_EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")

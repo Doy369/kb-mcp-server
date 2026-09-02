@@ -28,6 +28,7 @@ from urllib.parse import urlparse, parse_qs
 from kb_mcp_server.adapters import adapter_status, fetch_live, reload_adapters, self_check
 from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, DATA_DIR
 from kb_mcp_server.embeddings import get_embedder
+from kb_mcp_server.graph import expand_facts, get_graph_store
 from kb_mcp_server.ingestion import IngestionPipeline
 from kb_mcp_server.retrieval import HybridRetriever
 from kb_mcp_server.storage import PGVectorStore, get_store
@@ -39,8 +40,37 @@ if isinstance(_store, PGVectorStore):
     _store.connect()
 _store.ensure_schema()
 _emb = get_embedder()
+
+
+_graph = None
+
+
+def _get_graph():
+    """图存储单例；不可用时返回 None，图谱能力静默降级，不影响主链路。"""
+    global _graph
+    if _graph is None:
+        try:
+            _graph = get_graph_store()
+        except Exception as e:  # noqa: BLE001
+            print(f"[graph] 图存储不可用（{e}），图谱能力关闭")
+            _graph = False
+    return _graph or None
+
+
+def _graph_facts_for(question: str) -> dict:
+    """问答链路的关系侧召回；任何异常都降级为空，不让图谱拖垮答复。"""
+    g = _get_graph()
+    if not g:
+        return {}
+    try:
+        return expand_facts(g, question)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+_graph_store = _get_graph()
 _retriever = HybridRetriever(_store, _emb)
-_ingestor = IngestionPipeline(_store, _emb)
+_ingestor = IngestionPipeline(_store, _emb, graph=_graph_store)
 
 if getattr(sys, "frozen", False):
     STATIC_DIR = os.path.join(sys._MEIPASS, "static")
@@ -250,7 +280,10 @@ class Handler(BaseHTTPRequestHandler):
             doc_id = payload.get("doc_id") or f"doc_{_store.count() + 1}"
             text = payload.get("text", "")
             n = _ingestor.ingest_text(doc_id, text) if text else 0
-            return 200, {"doc_id": doc_id, "chunks": n, "backend": settings.storage_backend}, None
+            out = {"doc_id": doc_id, "chunks": n, "backend": settings.storage_backend}
+            if _ingestor.last_graph_result:
+                out["graph"] = _ingestor.last_graph_result
+            return 200, out, None
 
         if path == "/api/ingest_file":
             filename = payload.get("filename", "")
@@ -273,9 +306,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/sample":
             total = 0
+            graph_added = 0
             for did, txt in SAMPLE.items():
                 total += _ingestor.ingest_text(did, txt)
-            return 200, {"ingested": total, "count": _store.count()}, None
+                graph_added += (_ingestor.last_graph_result or {}).get("added", 0)
+            out = {"ingested": total, "count": _store.count()}
+            if graph_added:
+                out["graph"] = {"added": graph_added}
+            return 200, out, None
 
         if path == "/api/ingest_folder":
             folder = payload.get("folder", "")
@@ -321,12 +359,14 @@ class Handler(BaseHTTPRequestHandler):
             sku = payload.get("sku") or None
             hits = _retriever.search(question, top_k=top_k)
             live = fetch_live(question, order_id=order_id, sku=sku)
-            res = synthesize(question, hits, live, trace_id=trace_id)
+            gf = _graph_facts_for(question)
+            res = synthesize(question, hits, live, trace_id=trace_id, graph_facts=gf)
             res["latency_ms"] = 0  # 由 _dispatch 覆盖日志用，前端自行计时亦可
             extra = {
                 "query": question[:50],
                 "hits": len(hits),
                 "live": len(live),
+                "graph": len(gf.get("facts", [])),
                 "asks_with_live": bool(live),
             }
             return 200, res, extra
@@ -341,20 +381,110 @@ class Handler(BaseHTTPRequestHandler):
             history = payload.get("history") or None
             hits = _retriever.search(question, top_k=top_k)
             live = fetch_live(question, order_id=order_id, sku=sku)
-            res = synthesize(question, hits, live, trace_id=trace_id, history=history)
+            gf = _graph_facts_for(question)
+            res = synthesize(question, hits, live, trace_id=trace_id, history=history, graph_facts=gf)
             res["latency_ms"] = 0
             extra = {
                 "query": question[:50],
                 "hits": len(hits),
                 "live": len(live),
+                "graph": len(gf.get("facts", [])),
                 "asks_with_live": bool(live),
             }
             return 200, res, extra
 
+        # ---- P6 知识图谱（GraphRAG 关系层）----
+        if path == "/api/graph/stats":
+            g = _get_graph()
+            if not g:
+                return 200, {"enabled": False, "reason": "图谱未启用或后端不可用"}, None
+            s = g.stats()
+            s["enabled"] = True
+            return 200, s, None
+
+        if path == "/api/graph/entities":
+            g = _get_graph()
+            if not g:
+                return 200, [], None
+            return 200, g.find_entities(
+                name=payload.get("name", ""),
+                node_type=payload.get("node_type") or None,
+                limit=int(payload.get("limit", 20)),
+            ), None
+
+        if path == "/api/graph/query":
+            g = _get_graph()
+            if not g:
+                return 200, {"error": "图谱未启用或后端不可用"}, None
+            return 200, g.neighbors(
+                payload.get("entity", ""),
+                rel=payload.get("relation") or None,
+                direction=payload.get("direction", "out"),
+                depth=int(payload.get("depth", 2)),
+                limit=int(payload.get("limit", 30)),
+            ), None
+
+        if path == "/api/graph/expand":
+            g = _get_graph()
+            if not g:
+                return 200, {"entities": [], "facts": []}, None
+            return 200, expand_facts(
+                g, payload.get("query", ""),
+                depth=int(payload.get("depth", 2)),
+                limit=int(payload.get("limit", 12)),
+            ), None
+
+        if path == "/api/graph/paths":
+            g = _get_graph()
+            if not g:
+                return 200, [], None
+            return 200, g.paths(
+                payload.get("src", ""), payload.get("dst", ""),
+                max_depth=int(payload.get("max_depth", 3)),
+                limit=int(payload.get("limit", 10)),
+            ), None
+
+        if path == "/api/graph/rebuild":
+            g = _get_graph()
+            if not g:
+                return 200, {"error": "图谱未启用或后端不可用"}, None
+            from kb_mcp_server.graph import build_graph_from_store
+
+            return 200, build_graph_from_store(g, _store), None
+
+        # ---- P7 多 agent 协作 ----
+        if path == "/api/agent/ask":
+            from kb_mcp_server.agents import get_orchestrator
+
+            o = get_orchestrator()
+            res = o.ask(payload.get("question", ""),
+                        top_k=int(payload.get("top_k", 3)),
+                        order_id=payload.get("order_id") or None,
+                        sku=payload.get("sku") or None,
+                        history=payload.get("history") or None)
+            return 200, res, {
+                "query": (payload.get("question") or "")[:50],
+                "agents": len(res.get("agents", {}).get("trace", [])),
+                "agent_mode": res.get("agents", {}).get("mode"),
+            }
+
+        if path == "/api/agent/status":
+            from kb_mcp_server.agents import get_orchestrator
+
+            o = get_orchestrator()
+            return 200, {"mode": o.mode, "agents": o.agents_status()}, None
+
         if path == "/api/delete_doc":
             doc_id = payload.get("doc_id", "")
             n = _store.delete_doc(doc_id) if doc_id else 0
-            return 200, {"doc_id": doc_id, "deleted_chunks": n, "count": _store.count()}, None
+            out = {"doc_id": doc_id, "deleted_chunks": n, "count": _store.count()}
+            g = _get_graph()
+            if g and doc_id:
+                try:
+                    out["graph"] = g.delete_by_doc(doc_id)
+                except Exception as e:  # noqa: BLE001
+                    out["graph_error"] = str(e)
+            return 200, out, None
 
         if path in ("/api/config", "/api/config/test"):
             # 应用页面提交（含可选测试）：密钥留空则不覆盖；测试前先应用再探测

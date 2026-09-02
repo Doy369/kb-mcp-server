@@ -4,6 +4,11 @@ runtime_config.json
 
 # local persistence (memory store dump; contains ingested KB content)
 kb_store.json
+kb_store_demo.json
+
+# 知识图谱持久化（memory 图后端）+ demo 产物
+kb_graph.json
+kb_graph_demo.json
 
 # python
 __pycache__/

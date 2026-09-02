@@ -14,11 +14,11 @@
 
 import json
 import time
-import urllib.request
 import uuid
 
 from kb_mcp_server.adapters import normalize_live
 from kb_mcp_server.config import get_cfg
+from kb_mcp_server.llmclient import llm_chat
 
 
 def _new_trace() -> str:
@@ -56,10 +56,18 @@ def _confidence(top_score: float | None) -> tuple[str, float]:
     return ("低", top_score)
 
 
-def template_synthesis(question: str, hits: list[dict], live_cards: list[dict]) -> tuple[str, str]:
+def _graph_lines(graph_facts: dict | None, limit: int = 5) -> list[str]:
+    """把图谱事实渲染成可读路径行：路径本身就是可解释证据。"""
+    facts = (graph_facts or {}).get("facts") or []
+    return [f["path"] for f in facts[:limit] if f.get("path")]
+
+
+def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
+                       graph_facts: dict | None = None) -> tuple[str, str]:
     """返回 (summary 摘要, detail 详情)。"""
     top = hits[0] if hits else None
     summary = _clean_content(top["content"])[:160] if top else ""
+    graph_lines = _graph_lines(graph_facts)
 
     parts: list[str] = []
     if live_cards:
@@ -72,7 +80,12 @@ def template_synthesis(question: str, hits: list[dict], live_cards: list[dict]) 
             elif c["type"] == "prompt":
                 parts.append(f"{c['adapter']}：{c['note']}")
 
-    if not summary and not live_cards:
+    if graph_lines:
+        parts.append("【关系路径】")
+        for i, line in enumerate(graph_lines, 1):
+            parts.append(f"{i}. {line}")
+
+    if not summary and not live_cards and not graph_lines:
         summary = "未在知识库中找到相关片段，建议补充知识或转人工客服。"
 
     if hits:
@@ -84,7 +97,8 @@ def template_synthesis(question: str, hits: list[dict], live_cards: list[dict]) 
     return summary, detail
 
 
-def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], history: list[dict] | None = None) -> str | None:
+def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], history: list[dict] | None = None,
+                    graph_facts: dict | None = None) -> str | None:
     """调用本地 LLM 合成自然语言答复；任何异常返回 None（交由模板回退）。"""
     c = _llm_cfg()
     ctx = "\n".join(f"- {_clean_content(h['content'])}" for h in hits)
@@ -94,10 +108,12 @@ def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], his
         else f"- {c['adapter']}：{c['note']}"
         for c in live_cards
     )
+    graph_txt = "\n".join(f"- {line}" for line in _graph_lines(graph_facts))
     prompt = (
-        "你是企业 B2B 客服助手。仅依据给定的知识片段与实时数据，用简洁中文回答用户问题，"
-        "不要编造信息。\n\n"
-        f"用户问题：{question}\n\n知识片段：\n{ctx}\n\n实时数据：\n{live_txt}\n\n答复："
+        "你是企业 B2B 客服助手。仅依据给定的知识片段、关系事实与实时数据，用简洁中文回答用户问题，"
+        "不要编造信息。关系事实来自知识图谱，其路径即为判断依据，可在答复中说明推理链路。\n\n"
+        f"用户问题：{question}\n\n知识片段：\n{ctx}\n\n"
+        f"关系事实：\n{graph_txt}\n\n实时数据：\n{live_txt}\n\n答复："
     )
     if history:
         hist_txt = "\n".join(
@@ -108,34 +124,19 @@ def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], his
             "你是企业 B2B 客服助手。\n\n"
             f"对话历史（仅作上下文参考）：\n{hist_txt}\n\n" + prompt
         )
-    body = json.dumps({
-        "model": c["model"],
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 400,
-    }).encode("utf-8")
-    url = c["base_url"].rstrip("/") + "/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if c["api_key"]:
-        headers["Authorization"] = "Bearer " + c["api_key"]
-    req = urllib.request.Request(url, data=body, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"].strip() or None
-    except Exception:
-        return None
+    return llm_chat(prompt, temperature=0.2, max_tokens=400, timeout=15)
 
 
-def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str | None = None, history: list[dict] | None = None) -> dict:
-    """入口：装配最终答复。优先 LLM（若启用且可用），否则模板。"""
+def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str | None = None,
+               history: list[dict] | None = None, graph_facts: dict | None = None) -> dict:
+    """入口：装配最终答复。语义侧（hits）+ 关系侧（graph_facts）+ 实时数据（live）融合。"""
     c = _llm_cfg()
     live_cards = normalize_live(live)
-    summary, detail = template_synthesis(question, hits, live_cards)
+    summary, detail = template_synthesis(question, hits, live_cards, graph_facts)
     method = "template"
 
     if c["enabled"]:
-        llm_text = _llm_synthesize(question, hits, live_cards, history=history)
+        llm_text = _llm_synthesize(question, hits, live_cards, history=history, graph_facts=graph_facts)
         if llm_text:
             summary = llm_text[:200]
             detail = llm_text
@@ -143,6 +144,11 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
 
     top_score = hits[0]["score"] if hits else None
     conf_label, conf_score = _confidence(top_score)
+    # 图谱命中给置信度小幅加成：有结构化路径支撑，比纯向量命中更可信（上限 +0.06，避免喧宾夺主）
+    n_facts = len((graph_facts or {}).get("facts") or [])
+    if n_facts and conf_score:
+        conf_score = min(1.0, conf_score + 0.03 * min(n_facts, 2))
+        conf_label, _ = _confidence(conf_score)
     tid = trace_id or _new_trace()
 
     return {
@@ -152,6 +158,9 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
         "sources": [{"doc_id": h["doc_id"], "score": round(h["score"], 4)} for h in hits],
         "live_data": live,
         "live_cards": live_cards,
+        "graph_entities": (graph_facts or {}).get("entities", []),
+        "graph_facts": (graph_facts or {}).get("facts", []),
+        "graph_paths": _graph_lines(graph_facts),
         "confidence": {"label": conf_label, "score": round(conf_score, 4) if conf_score else 0.0},
         "synthesis_method": method,
         "trace_id": tid,
