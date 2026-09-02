@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from kb_mcp_server.agents.base import AgentContext, AgentResult, BaseAgent
 from kb_mcp_server.config import get_cfg
+from kb_mcp_server.extensions import agent_registry
 
 
 def graph_store_or_none():
@@ -36,6 +37,7 @@ class GraphBuilderAgent(BaseAgent):
     name = "GraphBuilder"
     role = "图谱构建"
     description = "对未入图的文档补建三元组（LLM 优先，规则兜底）"
+    capabilities = ["graph", "ingest"]
 
     def run(self, ctx: AgentContext) -> AgentResult:
         if not _graph_enabled():
@@ -83,6 +85,7 @@ class RetrieverAgent(BaseAgent):
     name = "Retriever"
     role = "语义检索"
     description = "向量 + BM25 混合召回知识片段"
+    capabilities = ["retrieval", "semantic"]
 
     def run(self, ctx: AgentContext) -> AgentResult:
         from kb_mcp_server.retrieval import HybridRetriever
@@ -103,6 +106,7 @@ class GraphReasonerAgent(BaseAgent):
     name = "GraphReasoner"
     role = "图谱推理"
     description = "从问题抽实体，查图谱多跳邻居，返回可解释关系路径"
+    capabilities = ["graph", "reasoning"]
 
     def run(self, ctx: AgentContext) -> AgentResult:
         if not _graph_enabled():
@@ -132,6 +136,7 @@ class LiveDataAgent(BaseAgent):
     name = "LiveData"
     role = "实时数据"
     description = "按问题意图调用订单/库存适配器取实时数据"
+    capabilities = ["live", "api"]
 
     def run(self, ctx: AgentContext) -> AgentResult:
         from kb_mcp_server.adapters import fetch_live
@@ -151,6 +156,7 @@ class SynthesizerAgent(BaseAgent):
     name = "Synthesizer"
     role = "合成答复"
     description = "知识片段 + 图谱路径 + 实时数据 → 结构化答复（含置信度与轨迹）"
+    capabilities = ["synthesis"]
 
     def run(self, ctx: AgentContext) -> AgentResult:
         from kb_mcp_server.synthesis import synthesize
@@ -164,3 +170,14 @@ class SynthesizerAgent(BaseAgent):
         return AgentResult(agent=self.name, role=self.role, ok=True,
                            summary=f"合成完成（{method}，置信度{conf.get('label', '?')}{extra}）",
                            detail={"method": method, "confidence": conf})
+
+
+# ---- 自注册进 AgentRegistry（P1-4 能力发现；未来「共同体」据此动态组队）----
+def _register_all() -> None:
+    reg = agent_registry()
+    for _a in (GraphBuilderAgent(), RetrieverAgent(), GraphReasonerAgent(),
+               LiveDataAgent(), SynthesizerAgent()):
+        reg.register(_a)
+
+
+_register_all()

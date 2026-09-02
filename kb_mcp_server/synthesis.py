@@ -19,6 +19,7 @@ import uuid
 from kb_mcp_server.adapters import normalize_live
 from kb_mcp_server.config import get_cfg
 from kb_mcp_server.llmclient import llm_chat
+from kb_mcp_server.extensions import apply_guardrail
 
 
 def _new_trace() -> str:
@@ -166,3 +167,5 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
         "trace_id": tid,
         "latency_ms": 0,
     }
+    # P1-5 护栏 seam：默认直通；接入真实 Guardrail 后此处自动生效（置信度拦截/人工复核）
+    return apply_guardrail(out)

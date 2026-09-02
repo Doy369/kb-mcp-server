@@ -26,16 +26,20 @@ from kb_mcp_server.agents.workers import (
     SynthesizerAgent,
 )
 from kb_mcp_server.config import get_cfg
+from kb_mcp_server.extensions import DeterministicPlanner
 
 
 class Orchestrator:
-    def __init__(self, mode: str | None = None):
+    def __init__(self, mode: str | None = None, planner=None):
         self._mode = mode
         self.graph_builder = GraphBuilderAgent()
         self.retriever = RetrieverAgent()
         self.graph_reasoner = GraphReasonerAgent()
         self.live_data = LiveDataAgent()
         self.synthesizer = SynthesizerAgent()
+        # P1-4 规划器 seam：默认确定性全跑；未来换成 LLM 动态分解只需传入别的 Planner
+        self.planner = planner or DeterministicPlanner(
+            self.retriever, self.graph_reasoner, self.live_data)
 
     @property
     def mode(self) -> str:
@@ -97,11 +101,8 @@ class Orchestrator:
         ctx.data["routing"] = routing
 
         # 3) 并行执行三个无依赖的 worker（线程池；纯 IO/CPU 轻，GIL 无碍）
-        plan: list = [self.retriever]
-        if need_graph:
-            plan.append(self.graph_reasoner)
-        if need_live:
-            plan.append(self.live_data)
+        #    由 Planner 决定本次跑哪些 agent —— 默认确定性全跑，预留动态协作入口
+        plan = self.planner.plan(ctx)
         with ThreadPoolExecutor(max_workers=len(plan)) as ex:
             results = list(ex.map(lambda a: a.execute(ctx), plan))
         trace.extend(r.to_dict() for r in results)

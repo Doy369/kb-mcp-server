@@ -24,6 +24,7 @@ class AgentContext:
     order_id: str | None = None
     sku: str | None = None
     history: list[dict] | None = None
+    tenant_id: str | None = None          # P2-6 多租户隔离占位（预留）
     mode: str = "deterministic"          # deterministic | llm
     intent: dict = field(default_factory=dict)
     hits: list[dict] = field(default_factory=list)        # Retriever 写
@@ -57,6 +58,7 @@ class BaseAgent(ABC):
     name: str = "Agent"
     role: str = ""
     description: str = ""
+    capabilities: list[str] = []          # P1-4 能力标签，供 AgentRegistry 发现
 
     @abstractmethod
     def run(self, ctx: AgentContext) -> AgentResult:
