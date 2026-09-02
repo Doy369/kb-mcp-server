@@ -154,6 +154,10 @@ class GraphStore(ABC):
     @abstractmethod
     def delete_by_doc(self, doc_id: str) -> dict: ...
 
+    @abstractmethod
+    def export_graph(self) -> dict:
+        """全量导出节点 + 边，供前端力导向可视化使用。返回 {backend, nodes, edges}。"""
+
     # ---- 便捷方法：批量写入三元组（本体校验在基类统一做）----
     def add_triples(self, triples: list[Triple]) -> dict:
         """写入一批三元组，返回 {added, skipped, invalid}。不合规的按本体约束丢弃。"""
@@ -405,6 +409,22 @@ class MemoryGraphStore(GraphStore):
             "ontology": {"node_types": NODE_TYPES, "relations": RELATIONS},
         }
 
+    def export_graph(self) -> dict:
+        nodes = [{
+            "id": key,
+            "name": n["name"],
+            "type": n["type"],
+            "type_label": NODE_TYPES.get(n["type"], n["type"]),
+            "degree": len(self._out.get(key, [])) + len(self._in.get(key, [])),
+        } for key, n in self._nodes.items()]
+        edges = [{
+            "source": e["src"],
+            "target": e["dst"],
+            "rel": e["rel"],
+            "rel_label": RELATIONS.get(e["rel"], e["rel"]),
+        } for e in self._edges]
+        return {"backend": "memory", "nodes": nodes, "edges": edges}
+
     def clear(self) -> int:
         n = len(self._edges)
         self._nodes, self._edges = {}, []
@@ -624,6 +644,29 @@ class AGEGraphStore(GraphStore):
             "edges": _age_int(edge_rows[0][0]) if edge_rows else 0,
             "ontology": {"node_types": NODE_TYPES, "relations": RELATIONS},
         }
+
+    def export_graph(self) -> dict:
+        q = (
+            "MATCH (n)-[r]->(m) "
+            "RETURN n.name AS sn, labels(n) AS sl, type(r) AS rel, m.name AS mn, labels(m) AS ml"
+        )
+        rows = self._cypher(q)
+        nodes: dict[str, dict] = {}
+        edges: list[dict] = []
+        for r in rows:
+            sn = _age_str(r[0]); sl = _age_list(r[1]) or ["Unknown"]
+            rel = _age_str(r[2]); mn = _age_str(r[3]); ml = _age_list(r[4]) or ["Unknown"]
+            sk = _node_key(sl[0], sn); dk = _node_key(ml[0], mn)
+            nodes[sk] = {"id": sk, "name": sn, "type": sl[0],
+                         "type_label": NODE_TYPES.get(sl[0], sl[0]), "degree": 0}
+            nodes[dk] = {"id": dk, "name": mn, "type": ml[0],
+                         "type_label": NODE_TYPES.get(ml[0], ml[0]), "degree": 0}
+            edges.append({"source": sk, "target": dk, "rel": rel,
+                          "rel_label": RELATIONS.get(rel, rel)})
+        for e in edges:
+            nodes[e["source"]]["degree"] += 1
+            nodes[e["target"]]["degree"] += 1
+        return {"backend": "age", "nodes": list(nodes.values()), "edges": edges}
 
     def clear(self) -> int:
         before = self.stats().get("edges", 0)

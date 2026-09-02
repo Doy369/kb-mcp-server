@@ -452,6 +452,12 @@ class Handler(BaseHTTPRequestHandler):
 
             return 200, build_graph_from_store(g, _store), None
 
+        if path == "/api/graph/export":
+            g = _get_graph()
+            if not g:
+                return 200, {"backend": None, "nodes": [], "edges": []}, None
+            return 200, g.export_graph(), None
+
         # ---- P7 多 agent 协作 ----
         if path == "/api/agent/ask":
             from kb_mcp_server.agents import get_orchestrator

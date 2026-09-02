@@ -293,6 +293,16 @@
         </div>
       </div>
     </div>
+
+    <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:14px">
+      <h2><span class="dot"></span>图谱网络（节点=实体 · 连线=关系）<span class="spacer"></span>
+        <button class="ghost btn-sm" id="graphNetLoad">加载 / 刷新网络</button></h2>
+      <div class="hint">颜色区分实体类型；拖动节点调整布局，悬停高亮相邻关系，滚轮缩放、拖拽空白平移。</div>
+      <div id="graphNetWrap" style="position:relative;width:100%;height:480px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)">
+        <svg id="graphNet" width="100%" height="100%" style="display:block;cursor:grab;touch-action:none"></svg>
+        <div id="graphNetTip" style="display:none;position:absolute;pointer-events:none;background:rgba(0,0,0,.78);color:#fff;padding:6px 9px;border-radius:6px;font-size:12px;max-width:280px;z-index:5;line-height:1.5"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ============ Agent 协作 ============ -->
@@ -686,7 +696,7 @@ document.querySelectorAll('.sidebar nav button').forEach(b=>{
     const tab = b.dataset.view;
     ['kb','search','config','graph','agents'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
     if(tab==='config'){ loadConfig(); }
-    if(tab==='graph'){ loadGraphStats(); loadGraphEntities(); }
+    if(tab==='graph'){ loadGraphStats(); loadGraphEntities(); graphNetEnsure(); }
     if(tab==='agents'){ loadAgentStatus(); }
   };
 });
@@ -789,6 +799,155 @@ $('graphRebuild').onclick = async ()=>{
     : `已重建：${j.docs} 篇文档，新增 ${j.added} 条关系，不合规丢弃 ${j.invalid}`;
   loadGraphStats(); loadGraphEntities();
 };
+
+// ===== 图谱网络可视化（力导向，纯 JS / 离线零依赖）=====
+const TYPE_COLORS = {
+  Document:'#8a8f98', Ticket:'#e07b39', Customer:'#2e9e5b', Product:'#3b82f6',
+  IssueCategory:'#a855f7', SLAClause:'#ef4444', Solution:'#10b981', RootCause:'#f59e0b'
+};
+const GN = { nodes:[], links:[], map:{}, view:{k:1,tx:0,ty:0}, raf:null, ready:false, drag:null, pan:null, hover:null };
+function gnColor(t){ return TYPE_COLORS[t] || '#64748b'; }
+
+function graphNetEnsure(){ if(!GN.ready) loadGraphNetwork(); }
+async function loadGraphNetwork(){
+  const j = await gapi('/api/graph/export');
+  const wrap = $('graphNetWrap');
+  const W = wrap.clientWidth || 800, H = wrap.clientHeight || 480;
+  const nodes = (j.nodes||[]).map((n,i)=>({
+    id:n.id, name:n.name, type:n.type, type_label:n.type_label||n.type, degree:n.degree||0,
+    x: Math.cos(i/(j.nodes.length||1)*Math.PI*2)*(Math.min(W,H)*0.32)+W/2,
+    y: Math.sin(i/(j.nodes.length||1)*Math.PI*2)*(Math.min(W,H)*0.32)+H/2,
+    vx:0, vy:0, fx:null, fy:null
+  }));
+  const map = {}; nodes.forEach(n=> map[n.id]=n);
+  const links = (j.edges||[]).map(e=>({source:map[e.source], target:map[e.target], rel:e.rel, rel_label:e.rel_label||e.rel}))
+                   .filter(e=> e.source && e.target);
+  GN.nodes = nodes; GN.links = links; GN.map = map;
+  GN.view = {k:1, tx:W/2, ty:H/2};
+  GN.ready = true;
+  gnRender(); // 创建/重置 SVG 元素
+  if(GN.raf) cancelAnimationFrame(GN.raf);
+  gnTick();
+}
+
+function gnRender(){
+  const svg = $('graphNet');
+  svg.innerHTML = '';
+  const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('id','gnG');
+  svg.appendChild(g);
+  // 连线
+  GN._lines = GN.links.map(l=>{
+    const ln = document.createElementNS('http://www.w3.org/2000/svg','line');
+    ln.setAttribute('stroke','#cbd5e1'); ln.setAttribute('stroke-width','1.2');
+    g.appendChild(ln); return ln;
+  });
+  // 节点
+  GN._dots = GN.nodes.map(n=>{
+    const r = 6 + Math.min(10, Math.sqrt(n.degree)*2.2);
+    const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('r', r); c.setAttribute('fill', gnColor(n.type));
+    c.setAttribute('stroke','#fff'); c.setAttribute('stroke-width','1.4');
+    c.style.cursor = 'pointer';
+    c.addEventListener('mousedown', e=>{ e.stopPropagation(); GN.drag = {n, sx:e.offsetX, sy:e.offsetY}; });
+    c.addEventListener('mouseenter', ()=> gnHover(n));
+    c.addEventListener('mouseleave', ()=> gnHover(null));
+    const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+    t.setAttribute('font-size','10'); t.setAttribute('fill','#334155'); t.setAttribute('text-anchor','middle');
+    t.textContent = n.name.length>8 ? n.name.slice(0,8)+'…' : n.name;
+    g.appendChild(c); g.appendChild(t);
+    return {c, t, r};
+  });
+  // 背景交互：平移 + 缩放
+  svg.onmousedown = e=>{ GN.pan = {sx:e.offsetX, sy:e.offsetY, tx:GN.view.tx, ty:GN.view.ty}; svg.style.cursor='grabbing'; };
+  svg.onmousemove = e=>{
+    if(GN.pan){ GN.view.tx = GN.pan.tx + (e.offsetX-GN.pan.sx); GN.view.ty = GN.pan.ty + (e.offsetY-GN.pan.sy); }
+    if(GN.drag){ const w = gnToWorld(e.offsetX, e.offsetY); GN.drag.n.fx=w.x; GN.drag.n.fy=w.y; }
+  };
+  window.addEventListener('mouseup', ()=>{ if(GN.drag){ GN.drag.n.fx=null; GN.drag.n.fy=null; } GN.drag=null; GN.pan=null; svg.style.cursor='grab'; });
+  svg.onwheel = e=>{
+    e.preventDefault();
+    const f = e.deltaY<0 ? 1.1 : 0.9;
+    const mx = e.offsetX, my = e.offsetY;
+    const wx = (mx-GN.view.tx)/GN.view.k, wy=(my-GN.view.ty)/GN.view.k;
+    GN.view.k = Math.max(0.3, Math.min(3, GN.view.k*f));
+    GN.view.tx = mx - wx*GN.view.k; GN.view.ty = my - wy*GN.view.k;
+  };
+}
+function gnToWorld(sx, sy){ return { x:(sx-GN.view.tx)/GN.view.k, y:(sy-GN.view.ty)/GN.view.k }; }
+
+function gnHover(n){
+  GN.hover = n ? n.id : null;
+  const tip = $('graphNetTip');
+  if(!n){ tip.style.display='none'; return; }
+  tip.style.display='block';
+  tip.innerHTML = `<b>${esc(n.name)}</b><br>类型：${esc(n.type_label)} · 关联 ${n.degree}`;
+  const g = $('graphNet'); const rect = g.getBoundingClientRect();
+  tip.style.left = (rect.width/2)+'px'; tip.style.top = '8px';
+}
+
+function gnTick(){
+  const REP=2200, SPRING=0.012, LEN=70, CENTER=0.006, DAMP=0.86, ITER=2;
+  for(let it=0; it<ITER; it++){
+    const ns = GN.nodes;
+    for(let i=0;i<ns.length;i++){
+      ns[i].fx2 = 0; ns[i].fy2 = 0;
+    }
+    for(let i=0;i<ns.length;i++){
+      for(let j=i+1;j<ns.length;j++){
+        let dx=ns[j].x-ns[i].x, dy=ns[j].y-ns[i].y;
+        let d2 = dx*dx+dy*dy + 0.01; let d = Math.sqrt(d2);
+        let f = REP/d2; let ux=dx/d, uy=dy/d;
+        ns[i].fx2 -= ux*f; ns[i].fy2 -= uy*f;
+        ns[j].fx2 += ux*f; ns[j].fy2 += uy*f;
+      }
+    }
+    GN.links.forEach(l=>{
+      let dx=l.target.x-l.source.x, dy=l.target.y-l.source.y;
+      let d = Math.sqrt(dx*dx+dy*dy)+0.01;
+      let f = (d-LEN)*SPRING; let ux=dx/d, uy=dy/d;
+      l.source.fx2 += ux*f; l.source.fy2 += uy*f;
+      l.target.fx2 -= ux*f; l.target.fy2 -= uy*f;
+    });
+    ns.forEach(n=>{
+      n.fx2 -= n.x*CENTER; n.fy2 -= n.y*CENTER;
+      if(n.fx!==null){ n.x=n.fx; n.y=n.fy; n.vx=0; n.vy=0; return; }
+      n.vx = (n.vx + n.fx2)*DAMP; n.vy = (n.vy + n.fy2)*DAMP;
+      n.x += n.vx; n.y += n.vy;
+    });
+  }
+  gnDraw();
+  GN.raf = requestAnimationFrame(gnTick);
+}
+
+function gnDraw(){
+  const k = GN.view.k, tx = GN.view.tx, ty = GN.view.ty;
+  const SX = x=> x*k+tx, SY = y=> y*k+ty;
+  const hi = GN.hover;
+  const inc = new Set();
+  if(hi){ GN.links.forEach(l=>{ if(l.source.id===hi) inc.add(l.target.id); if(l.target.id===hi) inc.add(l.source.id); }); }
+  GN.links.forEach((l,idx)=>{
+    const ln = GN._lines[idx];
+    ln.setAttribute('x1', SX(l.source.x)); ln.setAttribute('y1', SY(l.source.y));
+    ln.setAttribute('x2', SX(l.target.x)); ln.setAttribute('y2', SY(l.target.y));
+    const on = !hi || (l.source.id===hi || l.target.id===hi);
+    ln.setAttribute('stroke', on ? (hi ? '#6366f1' : '#cbd5e1') : '#eef2f7');
+    ln.setAttribute('stroke-width', on ? 1.6 : 1);
+    ln.setAttribute('opacity', on ? 1 : 0.25);
+  });
+  GN.nodes.forEach((n,i)=>{
+    const {c,t,r} = GN._dots[i];
+    const on = !hi || (n.id===hi || inc.has(n.id));
+    c.setAttribute('cx', SX(n.x)); c.setAttribute('cy', SY(n.y));
+    c.setAttribute('opacity', on ? 1 : 0.2);
+    c.setAttribute('stroke', n.id===hi ? '#111' : '#fff');
+    c.setAttribute('stroke-width', n.id===hi ? 2.4 : 1.4);
+    t.setAttribute('x', SX(n.x)); t.setAttribute('y', SY(n.y)-r-3);
+    t.setAttribute('opacity', on ? 1 : 0.2);
+  });
+}
+$('graphNetLoad').onclick = ()=> loadGraphNetwork();
+
 
 // ===== Agent 协作面板（P7）=====
 async function aapi(path, body){
