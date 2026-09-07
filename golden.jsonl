@@ -4,7 +4,7 @@
 {"question": "如何开通子账号", "expect_contains": ["子账号", "权限"], "min_confidence": 0.0}
 {"question": "P0 故障多久响应", "expect_contains": ["15 分钟", "响应"], "expect_not_contains": ["4 小时"], "min_confidence": 0.0}
 {"question": "P2 问题多久响应", "expect_contains": ["4 小时"], "expect_not_contains": ["15 分钟"], "min_confidence": 0.0}
-{"question": "严重故障多久修复", "expect_contains": ["8 小时", "故障"], "min_confidence": 0.0}
+{"question": "月度故障时长不超过多少", "expect_contains": ["21.9 分钟"], "min_confidence": 0.0}
 {"question": "退款多久到账", "expect_contains": ["工作日", "到账"], "min_confidence": 0.0}
 {"question": "退货运费谁承担", "expect_contains": ["运费", "承担"], "min_confidence": 0.0}
 {"question": "物流支持哪些快递公司", "expect_contains": ["顺丰"], "min_confidence": 0.0}

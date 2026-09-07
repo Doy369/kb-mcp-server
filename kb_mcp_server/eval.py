@@ -12,9 +12,34 @@
 
 from __future__ import annotations
 
+import re
 from typing import Callable
 
 from kb_mcp_server.extensions import Evaluator, GoldenCase, load_golden
+
+
+def _strip_evidence(answer: str) -> str:
+    """剔除答复里的【关系路径】证据段，只留【实时数据】与【知识依据】等答案主体。"""
+    parts = re.split(r"(【[^】]{2,8}】)", answer)
+    out: list[str] = []
+    skip = False
+    for p in parts:
+        if p.startswith("【") and p.endswith("】"):
+            skip = (p == "【关系路径】")
+            continue
+        if not skip:
+            out.append(p)
+    return "\n".join(out).strip()
+
+
+def _has(text: str, kw: str) -> bool:
+    """关键词匹配。数字开头的词要求前面不是数字，避免子串误命中。
+
+    反例：期望「8 小时」时，文本里的「48 小时」里含「8 小时」→ 假通过。
+    """
+    if kw[:1].isdigit():
+        return re.search(r"(?<!\d)" + re.escape(kw), text) is not None
+    return kw in text
 
 
 class RegressionEvaluator(Evaluator):
@@ -28,16 +53,20 @@ class RegressionEvaluator(Evaluator):
         self.recall_threshold = recall_threshold
 
     def evaluate(self, case: GoldenCase, actual: dict) -> dict:
-        text = (actual.get("answer") or "") + "\n" + (actual.get("summary") or "")
+        ans = actual.get("answer") or ""
+        # 只对**答案主体**做断言：【关系路径】是图谱证据段，天然会列出同类的其他条款，
+        # 算进答案会把「证据覆盖面广」误判成「答错」。注意要保留【实时数据】与【知识依据】。
+        # （证据段自身的质量问题见 ROADMAP 已知问题：图谱抽取未保留 P0/P1/P2 档位绑定）
+        text = _strip_evidence(ans) or (ans + "\n" + (actual.get("summary") or ""))
         expect = case.expect_contains or []
-        hit = [k for k in expect if k in text]
+        hit = [k for k in expect if _has(text, k)]
         missed = [k for k in expect if k not in hit]
         total = len(expect) or 1
         recall = len(hit) / total
         conf = (actual.get("confidence") or {}).get("score", 0.0) or 0.0
         agents = actual.get("agents") or {}
         # 反向断言：命中的禁止词说明召回了错误分块（如把 P2 的 4 小时当成 P0 的 15 分钟）
-        forbidden = [k for k in (case.expect_not_contains or []) if k in text]
+        forbidden = [k for k in (case.expect_not_contains or []) if _has(text, k)]
         passed = (recall >= self.recall_threshold
                   and float(conf) >= (case.min_confidence or 0.0)
                   and not forbidden)

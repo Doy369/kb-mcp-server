@@ -17,8 +17,95 @@ from kb_mcp_server.storage import VectorStore, get_store
 
 _BREAK_CHARS = set("。！？\n；;")
 
+# ---- 结构感知切片（P2-8）：解决「一行多档」导致的分块粒度问题 ----
+# 典型反例：samples/sla说明.md 的「响应：P0 15 分钟，P1 1 小时，P2 4 小时」
+# 整篇不足 300 字 → 旧逻辑整篇一个 chunk → 问 P0 时答案必然夹带 P2 的「4 小时」。
+_HEADING_RX = re.compile(r"^#{1,6}\s*(.+?)\s*$")
+_KV_RX = re.compile(r"^([^：:]{2,12})[：:]\s*(.+)$")
+_UNIT_RX = re.compile(r"\d+(?:\.\d+)?\s*(?:分钟|小时|工作日|自然日|天|日|%)")
+# FAQ 的 Q/A 必须成对：拆开后「问句」会单独成块，检索时反而命中没答案的问句行
+_QA_Q_RX = re.compile(r"^(?:Q|问)\s*[：:]\s*(.+)$")
+_QA_A_RX = re.compile(r"^(?:A|答)\s*[：:]\s*(.+)$")
+
+
+def _split_enumerated(line: str) -> list[str]:
+    """把「响应：P0 15 分钟，P1 1 小时，P2 4 小时」这类**一行多档**拆成多条。
+
+    只在同时满足以下条件时才拆，避免误伤普通句子：
+    1) 形如「键：值」；2) 值被逗号/分号切成 ≥2 段；3) 其中 ≥2 段带数量单位。
+    """
+    m = _KV_RX.match(line.strip())
+    if not m:
+        return [line]
+    key, val = m.group(1).strip(), m.group(2).strip()
+    segs = [s.strip() for s in re.split(r"[，,；;]", val) if s.strip()]
+    if len(segs) < 2 or sum(1 for s in segs if _UNIT_RX.search(s)) < 2:
+        return [line]
+    return [f"{key}：{s}" for s in segs]
+
+
+def chunk_structured(text: str, chunk_size: int = 300, overlap: int = 50) -> list[str]:
+    """结构感知切片：标题作为上下文前缀 + 一行多档拆条，保证每个 chunk 自包含。"""
+    heading = ""
+    pending_q = ""
+    units: list[str] = []
+
+    def emit(u: str) -> None:
+        units.append(f"{heading} / {u}" if heading else u)
+
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s:
+            continue
+        hm = _HEADING_RX.match(s)
+        if hm:                      # 标题不单独成块，作为后续内容的上下文
+            if pending_q:
+                emit(pending_q)
+                pending_q = ""
+            heading = hm.group(1).strip()
+            continue
+        body = s.lstrip("-*•").strip()
+
+        qm = _QA_Q_RX.match(body)   # 问句先攒着，等答案行来配对
+        if qm:
+            if pending_q:
+                emit(pending_q)
+            pending_q = "Q：" + qm.group(1).strip()
+            continue
+        am = _QA_A_RX.match(body)
+        if am:
+            ans = am.group(1).strip()
+            emit(f"{pending_q} A：{ans}" if pending_q else f"A：{ans}")
+            pending_q = ""
+            continue
+
+        if pending_q:               # 问句后没有 A 行，单独成块，别丢内容
+            emit(pending_q)
+            pending_q = ""
+        for sub in _split_enumerated(body):
+            emit(sub)
+    if pending_q:
+        emit(pending_q)
+
+    if not units:                   # 没有结构化内容，退回纯长度切片
+        return _chunk_plain(text, chunk_size, overlap)
+    out: list[str] = []
+    for u in units:
+        if len(u) <= chunk_size:
+            out.append(u)
+        else:
+            out.extend(_chunk_plain(u, chunk_size, overlap))
+    return out
+
 
 def chunk_text(text: str, chunk_size: int = 300, overlap: int = 50) -> list[str]:
+    """统一入口。KB_CHUNK_STRATEGY=fine（默认）走结构感知；plain 退回旧的长度切片。"""
+    if get_cfg("KB_CHUNK_STRATEGY", "fine").lower() == "plain":
+        return _chunk_plain(text, chunk_size, overlap)
+    return chunk_structured(text, chunk_size, overlap)
+
+
+def _chunk_plain(text: str, chunk_size: int = 300, overlap: int = 50) -> list[str]:
     """把长文本切成带重叠的片段，优先在句末标点/换行处断句。"""
     text = text.strip()
     if not text:
