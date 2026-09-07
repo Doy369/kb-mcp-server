@@ -24,7 +24,7 @@ _BREAK_SECONDS = 60
 
 def llm_chat(prompt: str, temperature: float = 0.2, max_tokens: int = 400,
              timeout: int = 15) -> str | None:
-    """调用本地 LLM，返回回复文本；禁用 / 熔断中 / 任何失败均返回 None。"""
+    """调用 LLM，返回回复文本；禁用 / 熔断中 / 任何失败均返回 None。"""
     global _BREAK_UNTIL
     if time.time() < _BREAK_UNTIL:
         return None
@@ -41,7 +41,12 @@ def llm_chat(prompt: str, temperature: float = 0.2, max_tokens: int = 400,
         headers["Authorization"] = "Bearer " + api_key
     req = urllib.request.Request(base + "/chat/completions", data=body, headers=headers)
     try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        # 本地 LLM（Ollama/vLLM）绕过系统代理——被 HTTP_PROXY 劫持时会白等数秒；
+        # 云端 API（DeepSeek/硅基流动等）则尊重系统代理
+        if "://localhost" in base or "://127.0.0.1" in base:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        else:
+            opener = urllib.request.build_opener()
         with opener.open(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         txt = (data["choices"][0]["message"]["content"] or "").strip()
