@@ -10,6 +10,10 @@ kb_store_demo.json
 kb_graph.json
 kb_graph_demo.json
 
+# 评测产物（每次重跑重新生成；报告本身入库以便前后对比）
+kb_store_eval.json
+kb_graph_eval.json
+
 # python
 __pycache__/
 *.pyc

@@ -1,0 +1,249 @@
+{
+  "total": 11,
+  "passed": 9,
+  "pass_rate": 0.818,
+  "avg_recall": 1.0,
+  "avg_confidence": 0.443,
+  "latency_p50_ms": 22.0,
+  "latency_p95_ms": 434.0,
+  "avg_graph_paths": 4.55,
+  "recall_threshold": 0.6,
+  "failed_cases": [
+    {
+      "question": "P0 故障多久响应",
+      "missed": [],
+      "forbidden": [
+        "4 小时"
+      ],
+      "recall": 1.0
+    },
+    {
+      "question": "P2 问题多久响应",
+      "missed": [],
+      "forbidden": [
+        "15 分钟"
+      ],
+      "recall": 1.0
+    }
+  ],
+  "rows": [
+    {
+      "question": "如何申请退货",
+      "expect": [
+        "退货",
+        "7 天"
+      ],
+      "hit": [
+        "退货",
+        "7 天"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.535,
+      "latency_ms": 434,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "怎么开具发票",
+      "expect": [
+        "发票",
+        "税号"
+      ],
+      "hit": [
+        "发票",
+        "税号"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.696,
+      "latency_ms": 20,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "下单后多久发货",
+      "expect": [
+        "48 小时",
+        "出库"
+      ],
+      "hit": [
+        "48 小时",
+        "出库"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.475,
+      "latency_ms": 21,
+      "graph_paths": 5,
+      "live": 1,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "如何开通子账号",
+      "expect": [
+        "子账号",
+        "权限"
+      ],
+      "hit": [
+        "子账号",
+        "权限"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.503,
+      "latency_ms": 23,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "P0 故障多久响应",
+      "expect": [
+        "15 分钟",
+        "响应"
+      ],
+      "hit": [
+        "15 分钟",
+        "响应"
+      ],
+      "missed": [],
+      "forbidden": [
+        "4 小时"
+      ],
+      "recall": 1.0,
+      "confidence": 0.352,
+      "latency_ms": 22,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": false
+    },
+    {
+      "question": "P2 问题多久响应",
+      "expect": [
+        "4 小时"
+      ],
+      "hit": [
+        "4 小时"
+      ],
+      "missed": [],
+      "forbidden": [
+        "15 分钟"
+      ],
+      "recall": 1.0,
+      "confidence": 0.269,
+      "latency_ms": 22,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": false
+    },
+    {
+      "question": "严重故障多久修复",
+      "expect": [
+        "8 小时",
+        "故障"
+      ],
+      "hit": [
+        "8 小时",
+        "故障"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.368,
+      "latency_ms": 23,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "退款多久到账",
+      "expect": [
+        "工作日",
+        "到账"
+      ],
+      "hit": [
+        "工作日",
+        "到账"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.392,
+      "latency_ms": 21,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "退货运费谁承担",
+      "expect": [
+        "运费",
+        "承担"
+      ],
+      "hit": [
+        "运费",
+        "承担"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.615,
+      "latency_ms": 17,
+      "graph_paths": 5,
+      "live": 0,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "物流支持哪些快递公司",
+      "expect": [
+        "顺丰"
+      ],
+      "hit": [
+        "顺丰"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.332,
+      "latency_ms": 18,
+      "graph_paths": 5,
+      "live": 1,
+      "method": "template",
+      "passed": true
+    },
+    {
+      "question": "订单现在到哪了",
+      "expect": [
+        "已发货"
+      ],
+      "hit": [
+        "已发货"
+      ],
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.332,
+      "latency_ms": 26,
+      "graph_paths": 0,
+      "live": 1,
+      "method": "template",
+      "passed": true
+    }
+  ]
+}

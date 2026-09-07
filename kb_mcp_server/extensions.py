@@ -158,6 +158,7 @@ def apply_guardrail(answer: dict, ctx: AgentContext | None = None) -> dict:
 class GoldenCase:
     question: str
     expect_contains: list[str] = field(default_factory=list)
+    expect_not_contains: list[str] = field(default_factory=list)   # 反向断言：防止召回错误分块
     order_id: str | None = None
     sku: str | None = None
     min_confidence: float = 0.0
@@ -186,6 +187,7 @@ def load_golden(path: str) -> list[GoldenCase]:
         out.append(GoldenCase(
             question=it["question"],
             expect_contains=it.get("expect_contains", []),
+            expect_not_contains=it.get("expect_not_contains", []),
             order_id=it.get("order_id"),
             sku=it.get("sku"),
             min_confidence=float(it.get("min_confidence", 0.0)),
