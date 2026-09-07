@@ -2,20 +2,22 @@
   "total": 11,
   "passed": 10,
   "pass_rate": 0.909,
-  "avg_recall": 1.0,
-  "avg_confidence": 0.55,
-  "latency_p50_ms": 59.0,
-  "latency_p95_ms": 323.0,
+  "avg_recall": 0.909,
+  "avg_confidence": 0.565,
+  "latency_p50_ms": 54.0,
+  "latency_p95_ms": 385.0,
   "avg_graph_paths": 4.55,
   "recall_threshold": 0.6,
   "failed_cases": [
     {
       "question": "P2 问题多久响应",
-      "missed": [],
+      "missed": [
+        "4 小时"
+      ],
       "forbidden": [
         "15 分钟"
       ],
-      "recall": 1.0
+      "recall": 0.0
     }
   ],
   "rows": [
@@ -33,7 +35,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.535,
-      "latency_ms": 323,
+      "latency_ms": 385,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -53,7 +55,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.696,
-      "latency_ms": 52,
+      "latency_ms": 49,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -73,7 +75,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.573,
-      "latency_ms": 58,
+      "latency_ms": 61,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
@@ -93,7 +95,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.503,
-      "latency_ms": 59,
+      "latency_ms": 51,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -112,8 +114,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.567,
-      "latency_ms": 63,
+      "confidence": 0.494,
+      "latency_ms": 56,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -124,16 +126,16 @@
       "expect": [
         "4 小时"
       ],
-      "hit": [
+      "hit": [],
+      "missed": [
         "4 小时"
       ],
-      "missed": [],
       "forbidden": [
         "15 分钟"
       ],
-      "recall": 1.0,
-      "confidence": 0.438,
-      "latency_ms": 65,
+      "recall": 0.0,
+      "confidence": 0.407,
+      "latency_ms": 56,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -150,8 +152,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.603,
-      "latency_ms": 59,
+      "confidence": 0.614,
+      "latency_ms": 54,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -171,7 +173,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.541,
-      "latency_ms": 62,
+      "latency_ms": 53,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -191,7 +193,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.72,
-      "latency_ms": 58,
+      "latency_ms": 52,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -209,7 +211,7 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.538,
-      "latency_ms": 55,
+      "latency_ms": 50,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
@@ -226,8 +228,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.332,
-      "latency_ms": 56,
+      "confidence": 0.598,
+      "latency_ms": 67,
       "graph_paths": 0,
       "live": 1,
       "method": "template",
