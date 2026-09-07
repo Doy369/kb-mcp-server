@@ -1,41 +1,30 @@
 {
   "total": 11,
-  "passed": 10,
-  "pass_rate": 0.909,
-  "avg_recall": 0.909,
-  "avg_confidence": 0.565,
-  "latency_p50_ms": 54.0,
-  "latency_p95_ms": 385.0,
+  "passed": 11,
+  "pass_rate": 1.0,
+  "avg_recall": 1.0,
+  "avg_confidence": 0.791,
+  "latency_p50_ms": 678.0,
+  "latency_p95_ms": 4846.0,
   "avg_graph_paths": 4.55,
   "recall_threshold": 0.6,
-  "failed_cases": [
-    {
-      "question": "P2 问题多久响应",
-      "missed": [
-        "4 小时"
-      ],
-      "forbidden": [
-        "15 分钟"
-      ],
-      "recall": 0.0
-    }
-  ],
+  "failed_cases": [],
   "rows": [
     {
       "question": "如何申请退货",
       "expect": [
         "退货",
-        "7 天"
+        "7 个自然日"
       ],
       "hit": [
         "退货",
-        "7 天"
+        "7 个自然日"
       ],
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.535,
-      "latency_ms": 385,
+      "confidence": 0.78,
+      "latency_ms": 825,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -54,8 +43,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.696,
-      "latency_ms": 49,
+      "confidence": 0.805,
+      "latency_ms": 617,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -74,8 +63,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.573,
-      "latency_ms": 61,
+      "confidence": 0.846,
+      "latency_ms": 707,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
@@ -94,8 +83,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.503,
-      "latency_ms": 51,
+      "confidence": 0.841,
+      "latency_ms": 638,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -114,8 +103,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.494,
-      "latency_ms": 56,
+      "confidence": 0.762,
+      "latency_ms": 678,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -126,20 +115,18 @@
       "expect": [
         "4 小时"
       ],
-      "hit": [],
-      "missed": [
+      "hit": [
         "4 小时"
       ],
-      "forbidden": [
-        "15 分钟"
-      ],
-      "recall": 0.0,
-      "confidence": 0.407,
-      "latency_ms": 56,
+      "missed": [],
+      "forbidden": [],
+      "recall": 1.0,
+      "confidence": 0.706,
+      "latency_ms": 4846,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
-      "passed": false
+      "passed": true
     },
     {
       "question": "月度故障时长不超过多少",
@@ -152,8 +139,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.614,
-      "latency_ms": 54,
+      "confidence": 0.796,
+      "latency_ms": 742,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -172,8 +159,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.541,
-      "latency_ms": 53,
+      "confidence": 0.848,
+      "latency_ms": 642,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -192,8 +179,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.72,
-      "latency_ms": 52,
+      "confidence": 0.845,
+      "latency_ms": 667,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
@@ -210,8 +197,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.538,
-      "latency_ms": 50,
+      "confidence": 0.852,
+      "latency_ms": 658,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
@@ -228,8 +215,8 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.598,
-      "latency_ms": 67,
+      "confidence": 0.615,
+      "latency_ms": 683,
       "graph_paths": 0,
       "live": 1,
       "method": "template",

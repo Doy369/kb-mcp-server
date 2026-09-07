@@ -73,9 +73,17 @@ class BGEEmbedder:
         return self.encode(text)[0]
 
 
+_embedder_instance = None
+
+
 def get_embedder():
-    """按配置返回嵌入器实例。"""
-    backend = get_settings().embedding_backend
-    if backend == "bge":
-        return BGEEmbedder()
-    return DevEmbedder()
+    """按配置返回嵌入器实例（进程内单例）。
+
+    bge 模型约 1.3GB，逐次 new 会反复重载并撑爆内存；单例保证模型只加载一次、
+    全局共享（app 摄取、agent 检索、server 查询共用同一实例）。
+    """
+    global _embedder_instance
+    if _embedder_instance is None:
+        backend = get_settings().embedding_backend
+        _embedder_instance = BGEEmbedder() if backend == "bge" else DevEmbedder()
+    return _embedder_instance

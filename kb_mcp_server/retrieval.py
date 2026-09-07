@@ -101,8 +101,11 @@ class HybridRetriever:
             h = dict(detail[key])
             vs = vec_score.get(key)
             h["vec_score"] = vs
-            # 最终 score：有向量余弦用余弦（置信度正确）；BM25-only 降权，避免假高置信
-            h["score"] = vs if vs is not None else (0.3 + 0.5 * h.get("_norm", 0.0))
+            # 最终 score：有向量余弦用余弦（语义置信度，正确）。
+            # BM25-only 命中是「仅字面匹配、无语义佐证」，必须**显著低于**任何向量命中，
+            # 否则会反超语义正确的块（如标题行「物流配送常见问题」压过真正的答案块）。
+            # 因此映射到 [0, 0.3] 区间（向量余弦相关命中通常 ≥ 0.4）。
+            h["score"] = vs if vs is not None else (0.3 * h.get("_norm", 0.0))
             out.append(h)
         return out
 

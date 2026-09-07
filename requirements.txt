@@ -9,6 +9,6 @@ pydantic
 python-dotenv
 
 # 生产嵌入（KB_EMBEDDING_BACKEND=bge 时启用，本地模型数据不出域）
-# sentence-transformers
+sentence-transformers
 
 # 离线/开发模式（memory 后端 + dev 嵌入器）零额外依赖，无需 numpy

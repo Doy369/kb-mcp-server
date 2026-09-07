@@ -1,4 +1,4 @@
-{"question": "如何申请退货", "expect_contains": ["退货", "7 天"], "min_confidence": 0.0}
+{"question": "如何申请退货", "expect_contains": ["退货", "7 个自然日"], "min_confidence": 0.0}
 {"question": "怎么开具发票", "expect_contains": ["发票", "税号"], "min_confidence": 0.0}
 {"question": "下单后多久发货", "expect_contains": ["48 小时", "出库"], "min_confidence": 0.0}
 {"question": "如何开通子账号", "expect_contains": ["子账号", "权限"], "min_confidence": 0.0}
