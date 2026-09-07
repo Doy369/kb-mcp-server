@@ -17,6 +17,9 @@ from kb_mcp_server.storage import VectorStore, get_store
 
 _BREAK_CHARS = set("。！？\n；;")
 
+# 嵌入批量大小：大模型（bge）批量编码远快于逐条；32 平衡吞吐与内存
+_EMBED_BATCH = 32
+
 # ---- 结构感知切片（P2-8）：解决「一行多档」导致的分块粒度问题 ----
 # 典型反例：samples/sla说明.md 的「响应：P0 15 分钟，P1 1 小时，P2 4 小时」
 # 整篇不足 300 字 → 旧逻辑整篇一个 chunk → 问 P0 时答案必然夹带 P2 的「4 小时」。
@@ -228,12 +231,15 @@ class IngestionPipeline:
     def ingest_text(self, doc_id: str, text: str, chunk_size: int = 300, overlap: int = 50,
                     graph: bool = True) -> int:
         chunks = chunk_text(text, chunk_size, overlap)
-        for i, ch in enumerate(chunks):
-            emb = self.embedder.encode_one(ch)
-            self.store.add_chunk(
-                doc_id, ch, emb,
-                meta={"chunk_index": i, "char_len": len(ch)},
-            )
+        # 批量编码：bge 等大模型逐条 encode_one 慢一个数量级；按批控制内存峰值
+        for start in range(0, len(chunks), _EMBED_BATCH):
+            batch = chunks[start:start + _EMBED_BATCH]
+            embs = self.embedder.encode(batch)
+            for i, (ch, emb) in enumerate(zip(batch, embs)):
+                self.store.add_chunk(
+                    doc_id, ch, emb,
+                    meta={"chunk_index": start + i, "char_len": len(ch)},
+                )
         self.last_graph_result = self._graph_hook(doc_id, text, enabled=graph)
         return len(chunks)
 

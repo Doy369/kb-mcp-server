@@ -28,6 +28,7 @@ from urllib.parse import urlparse, parse_qs
 from kb_mcp_server.adapters import adapter_status, fetch_live, reload_adapters, self_check
 from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, DATA_DIR
 from kb_mcp_server.embeddings import get_embedder
+from kb_mcp_server.extensions import install_default_guardrail
 from kb_mcp_server.graph import expand_facts, get_graph_store
 from kb_mcp_server.ingestion import IngestionPipeline
 from kb_mcp_server.retrieval import HybridRetriever
@@ -40,6 +41,8 @@ if isinstance(_store, PGVectorStore):
     _store.connect()
 _store.ensure_schema()
 _emb = get_embedder()
+# P1-5 护栏：低置信度答复标记「需人工复核」（阈值见 KB_GUARDRAIL_MIN_CONFIDENCE）
+install_default_guardrail()
 
 
 _graph = None

@@ -33,10 +33,17 @@
 - 待补：LLM 动态任务分解 / 多轮协商 / 人工介入；agent 按能力动态组队。
 - 接口：**`Planner`（已用 `DeterministicPlanner` 默认接入）／ `AgentRegistry`（agent 已自注册并打 `capabilities` 标签）**。
 
-### P1-5 评估与护栏（合规刚需）
-- 现状：仅 `trace_id` 基础留痕；无 golden 集/评测脚本、无幻觉抑制、置信度未真正拦截、无审计日志落盘。
-- 待补：golden 回归脚本；`Guardrail` 实现（低置信度 → 标记需人工复核 / 拦截）；审计日志落盘。
-- 接口：**`Guardrail`（已用 `PassthroughGuardrail` 默认接入合成链路）／ `Evaluator` + `load_golden()`（已预留）**。
+### P1-5 评估与护栏（合规刚需）——**核心已落地（2026-09-07）**
+- ~~现状：仅 `trace_id` 基础留痕；无 golden 集/评测脚本、无幻觉抑制、置信度未真正拦截、无审计日志落盘。~~
+- **已落地**：
+  - **置信度护栏**（`ConfidenceGuardrail`）：低于阈值的答复自动追加「[需人工复核]」+ 判定原因，
+    由 app / server 启动时自动安装；实测胡言乱语问题（bge 置信 0.47）被正确拦截，正常问答（≥0.61）直通。
+  - **审计日志**（`kb_mcp_server/audit.py`）：每次问答追加一条 JSONL（trace_id / 问题 / 置信度 /
+    护栏判定 / 耗时 / 失败 agent），线程安全、异常静默，默认项目根 `kb_audit.jsonl`（`KB_AUDIT_LOG=off` 关闭）。
+  - **护栏/档位按嵌入后端校准**：bge 分数带整体高于 dev（无关问题 bge 也能到 ~0.47，dev 约 0.1），
+    固定阈值会失真；现 bge 默认阈值 0.5 / dev 0.2，可用 `KB_GUARDRAIL_MIN_CONFIDENCE` 覆盖。
+- 待补：审计检索/管理界面；护栏细分策略（低置信不同原因不同处置）。
+- 接口：**`Guardrail`（`ConfidenceGuardrail` 已替换 `PassthroughGuardrail` 默认接入）**。
 
 ---
 

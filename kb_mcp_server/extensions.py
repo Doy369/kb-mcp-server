@@ -127,6 +127,45 @@ class PassthroughGuardrail(Guardrail):
         return GateResult(passed=True, action="pass")
 
 
+class ConfidenceGuardrail(Guardrail):
+    """P1-5 置信度护栏：低于阈值的答复标记「需人工复核」，不静默放行低质量答案。
+
+    阈值读运行时配置 KB_GUARDRAIL_MIN_CONFIDENCE；未配置时按嵌入后端给校准默认
+    （bge 分数带整体高于 dev：无关问题 bge 也能到 ~0.47，dev 约 0.1）。
+    设 0 = 关闭护栏（直通）。
+    """
+
+    def __init__(self, min_confidence: float | None = None):
+        self._min = min_confidence
+
+    def _threshold(self) -> float:
+        if self._min is not None:
+            return self._min
+        try:
+            from kb_mcp_server.config import get_cfg, get_settings
+
+            v = (get_cfg("KB_GUARDRAIL_MIN_CONFIDENCE", "") or "").strip()
+            if v:
+                return float(v)
+            return 0.5 if get_settings().embedding_backend == "bge" else 0.2
+        except Exception:  # noqa: BLE001
+            return 0.2
+
+    def check(self, answer: dict, ctx: AgentContext | None = None) -> GateResult:
+        th = self._threshold()
+        if th <= 0:
+            return GateResult(passed=True, action="pass")
+        conf = answer.get("confidence") or {}
+        score = float(conf.get("score") or 0.0)
+        if score < th:
+            return GateResult(
+                passed=False,
+                reason=f"置信度 {score:.3f} 低于阈值 {th:.2f}（档位：{conf.get('label', '?')}）",
+                action="escalate",
+            )
+        return GateResult(passed=True, action="pass")
+
+
 _DEFAULT_GUARDRAIL: Guardrail | None = None
 
 
@@ -135,18 +174,28 @@ def set_guardrail(g: Guardrail | None) -> None:
     _DEFAULT_GUARDRAIL = g
 
 
+def install_default_guardrail(g: Guardrail | None = None) -> Guardrail:
+    """安装默认护栏（已安装则不动）。P1-5 落地后由 app / server 启动时调用。"""
+    global _DEFAULT_GUARDRAIL
+    if _DEFAULT_GUARDRAIL is None:
+        _DEFAULT_GUARDRAIL = g or ConfidenceGuardrail()
+    return _DEFAULT_GUARDRAIL
+
+
 def apply_guardrail(answer: dict, ctx: AgentContext | None = None) -> dict:
     """合成后调用；默认无护栏（直通）。接入真实 Guardrail 后自动生效。"""
     g = _DEFAULT_GUARDRAIL
     if g is None:
         return answer
     res = g.check(answer, ctx)
-    if not res.passed and res.action in ("block", "escalate"):
-        answer = dict(answer)
-        answer["guardrail"] = {"passed": False, "reason": res.reason, "action": res.action}
+    if res.passed:
+        return answer
+    answer = dict(answer)
+    # 无论何种处置都记录判定结果，供 UI / 审计展示
+    answer["guardrail"] = {"passed": False, "reason": res.reason, "action": res.action}
+    if res.action in ("block", "escalate"):
         answer["answer"] = (answer.get("answer") or "") + "\n[需人工复核]"
     elif res.override:
-        answer = dict(answer)
         answer.update(res.override)
     return answer
 

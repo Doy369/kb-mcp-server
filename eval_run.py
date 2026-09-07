@@ -29,6 +29,7 @@ os.environ.setdefault("KB_EMBEDDING_BACKEND", "dev")
 os.environ.setdefault("KB_LLM_ENABLED", "0")
 os.environ.setdefault("KB_AGENT_MODE", "deterministic")
 os.environ.setdefault("KB_API_MOCK", "1")
+os.environ.setdefault("KB_AUDIT_LOG", "off")  # 评测不污染真实审计日志
 
 # 每次重跑重新播种，保证结果可复现
 for _f in ("kb_store_eval.json", "kb_graph_eval.json"):

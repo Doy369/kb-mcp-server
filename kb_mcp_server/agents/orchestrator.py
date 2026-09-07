@@ -25,6 +25,7 @@ from kb_mcp_server.agents.workers import (
     RetrieverAgent,
     SynthesizerAgent,
 )
+from kb_mcp_server.audit import audit
 from kb_mcp_server.config import get_cfg
 from kb_mcp_server.extensions import DeterministicPlanner
 
@@ -119,6 +120,17 @@ class Orchestrator:
             "total_ms": ms,
             "failed": [t["agent"] for t in trace if not t.get("ok", False)],
         }
+        # P1-5 审计日志：每次问答落一条 JSONL（问题/置信度/护栏判定/耗时/失败 agent）
+        audit({
+            "trace_id": out.get("trace_id"),
+            "question": question,
+            "confidence": out.get("confidence"),
+            "synthesis_method": out.get("synthesis_method"),
+            "guardrail": out.get("guardrail"),
+            "latency_ms": ms,
+            "agent_mode": self.mode,
+            "failed_agents": out["agents"]["failed"],
+        })
         return out
 
 

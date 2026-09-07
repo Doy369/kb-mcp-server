@@ -47,12 +47,32 @@ def _clean_content(content: str) -> str:
     return c
 
 
+def _conf_thresholds() -> tuple[float, float]:
+    """置信度分档阈值（高 / 中 边界），按嵌入后端校准。
+
+    dev 哈希嵌入分数带低（相关命中约 0.3-0.4）；bge 分数带整体抬高
+    （无关问题也能到 ~0.47，真实问题 0.6-0.85）。固定阈值在 bge 下会把
+    垃圾答复也标成「高」，因此分档必须随后端走。可用 KB_CONFIDENCE_HIGH/LOW 覆盖。
+    """
+    from kb_mcp_server.config import get_settings
+
+    backend = get_settings().embedding_backend
+    if backend == "bge":
+        hi = float(get_cfg("KB_CONFIDENCE_HIGH", "0.6") or 0.6)
+        lo = float(get_cfg("KB_CONFIDENCE_LOW", "0.5") or 0.5)
+    else:
+        hi = float(get_cfg("KB_CONFIDENCE_HIGH", "0.35") or 0.35)
+        lo = float(get_cfg("KB_CONFIDENCE_LOW", "0.2") or 0.2)
+    return hi, lo
+
+
 def _confidence(top_score: float | None) -> tuple[str, float]:
     if top_score is None:
         return ("低", 0.0)
-    if top_score >= 0.35:
+    hi, lo = _conf_thresholds()
+    if top_score >= hi:
         return ("高", top_score)
-    if top_score >= 0.20:
+    if top_score >= lo:
         return ("中", top_score)
     return ("低", top_score)
 
@@ -152,7 +172,7 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
         conf_label, _ = _confidence(conf_score)
     tid = trace_id or _new_trace()
 
-    return {
+    out = {
         "question": question,
         "answer": detail,
         "summary": summary,
@@ -167,5 +187,5 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
         "trace_id": tid,
         "latency_ms": 0,
     }
-    # P1-5 护栏 seam：默认直通；接入真实 Guardrail 后此处自动生效（置信度拦截/人工复核）
+    # P1-5 护栏：低置信度答复标记「需人工复核」（见 extensions.ConfidenceGuardrail）
     return apply_guardrail(out)

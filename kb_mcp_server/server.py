@@ -3,6 +3,7 @@ from mcp.server.fastmcp import FastMCP
 from kb_mcp_server.adapters import fetch_live
 from kb_mcp_server.config import get_settings
 from kb_mcp_server.embeddings import get_embedder
+from kb_mcp_server.extensions import install_default_guardrail
 from kb_mcp_server.graph import expand_facts, format_path
 from kb_mcp_server.ingestion import IngestionPipeline, graph_enabled
 from kb_mcp_server.retrieval import HybridRetriever
@@ -11,6 +12,8 @@ from kb_mcp_server.synthesis import synthesize
 
 settings = get_settings()
 mcp = FastMCP("kb-mcp-server")
+# P1-5 护栏：低置信度答复标记「需人工复核」（阈值见 KB_GUARDRAIL_MIN_CONFIDENCE）
+install_default_guardrail()
 
 # 进程内单例：保证 ingest / search 共用同一存储（memory 后端尤其重要）
 _store = None
