@@ -89,6 +89,7 @@ API_CONFIG_KEYS = [
     "KB_INVENTORY_API_URL", "KB_INVENTORY_PATH_TPL", "KB_INVENTORY_STOCK_PATH",
     "KB_INVENTORY_WAREHOUSE_PATH", "KB_INVENTORY_TEST_SKU",
     "KB_LLM_ENABLED", "KB_LLM_PROVIDER", "KB_LLM_MODEL", "KB_LLM_BASE_URL", "KB_LLM_API_KEY",
+    "KB_GUARDRAIL_MIN_CONFIDENCE",
 ]
 _KEY_MASK = "***已设置***"
 _MASKED_KEYS = ("KB_API_KEY", "KB_LLM_API_KEY")
@@ -276,6 +277,10 @@ class Handler(BaseHTTPRequestHandler):
             cfg["_llm_key_set"] = llm_key_set
             cfg["_adapters"] = adapter_status()
             return 200, cfg, None
+        if path == "/api/audit":
+            # P1-5 审计日志：最近 50 条问答记录（新→旧）
+            from kb_mcp_server.audit import read_recent
+            return 200, {"entries": read_recent(50)}, None
         return 404, {"error": "not found"}, None
 
     def _post(self, path: str, payload: dict):
@@ -376,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/chat":
             # 对话窗口接口：与 /api/ask 同链路，额外接收多轮 history 供 LLM 合成增强。
+            from kb_mcp_server.audit import audit as _audit
+
+            t0 = time.perf_counter()
             trace_id = uuid.uuid4().hex[:12]
             question = payload.get("question", "")
             top_k = int(payload.get("top_k", 5))
@@ -386,7 +394,18 @@ class Handler(BaseHTTPRequestHandler):
             live = fetch_live(question, order_id=order_id, sku=sku)
             gf = _graph_facts_for(question)
             res = synthesize(question, hits, live, trace_id=trace_id, history=history, graph_facts=gf)
-            res["latency_ms"] = 0
+            res["latency_ms"] = round((time.perf_counter() - t0) * 1000)
+            # P1-5：对话窗问答同样落审计（与 agent 链路同构）
+            _audit({
+                "trace_id": trace_id,
+                "question": question,
+                "confidence": res.get("confidence"),
+                "synthesis_method": res.get("synthesis_method"),
+                "guardrail": res.get("guardrail"),
+                "latency_ms": res["latency_ms"],
+                "agent_mode": "chat",
+                "failed_agents": [],
+            })
             extra = {
                 "query": question[:50],
                 "hits": len(hits),

@@ -42,3 +42,27 @@ def audit(entry: dict) -> None:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:  # noqa: BLE001
         pass
+
+
+def read_recent(n: int = 50) -> list[dict]:
+    """读取最近 n 条审计记录（新→旧）；未启用 / 文件不存在 / 损坏返回空列表。"""
+    try:
+        path = _audit_path()
+        if not path or not os.path.exists(path):
+            return []
+        with _lock, open(path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        out = []
+        for line in reversed(lines[-n * 2:]):  # 多读一倍容错坏行
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                out.append(json.loads(line))
+            except Exception:  # noqa: BLE001
+                continue
+            if len(out) >= n:
+                break
+        return out
+    except Exception:  # noqa: BLE001
+        return []

@@ -335,6 +335,12 @@
         <div class="result" id="agResult" style="margin-top:10px"><div class="empty">提问后查看 agent 轨迹与协作答复。</div></div>
       </div>
     </div>
+
+    <!-- P1-5 审计日志 -->
+    <h2 style="margin-top:16px"><span class="dot"></span>审计日志（每次问答留痕） <span class="spacer"></span>
+      <button class="ghost btn-sm" id="auditRefresh">刷新</button></h2>
+    <div class="hint" style="margin-bottom:8px">每条问答自动落一条审计记录（时间 / 问题 / 置信度 / 护栏判定 / 耗时），只追加不删改——B2B 合规刚需。最近 50 条：</div>
+    <div class="doclist" id="auditList" style="max-height:260px"><div class="empty">加载中…</div></div>
   </section>
 
   <!-- ============ 接口配置 ============ -->
@@ -419,6 +425,12 @@
         <input type="text" id="KB_LLM_BASE_URL" placeholder="如 https://api.deepseek.com/v1" />
         <label>API Key（模型平台给的密钥）</label>
         <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" />
+
+        <!-- ③ 答案护栏（P1-5） -->
+        <h2 style="margin-top:18px"><span class="dot"></span>③ 答案护栏（防止答非所问）</h2>
+        <p class="hint">置信度低于阈值的答复会自动标记「需人工复核」，不会静默放行。留空用默认（bge 嵌入 0.5 / 离线嵌入 0.2），填 0 关闭护栏。</p>
+        <label>最低置信度阈值（0 ~ 1 的小数）</label>
+        <input type="text" id="KB_GUARDRAIL_MIN_CONFIDENCE" placeholder="默认 0.5（bge）/ 0.2（离线）" />
 
         <div class="row" style="margin-top:16px">
           <button id="cfgSave">保存并应用</button>
@@ -636,6 +648,10 @@ function addBot(answer, j){
   }
   turns.push({role:'assistant', content:answer});
   const conf = j.confidence?.label==='高'?'high':j.confidence?.label==='中'?'mid':'low';
+  const gr = j.guardrail;
+  const grPill = (gr && !gr.passed)
+    ? `<span class="pill" style="background:#fff4e5;color:#c96a00;border:1px solid #f2c48d">⚠ 需人工复核</span>`
+    : '';
   const m = document.createElement('div');
   m.className='msg bot';
   m.innerHTML = `<div class="avatar">KB</div><div class="bubble">
@@ -644,10 +660,12 @@ function addBot(answer, j){
       <div class="src">来源：${(j.sources||[]).map(s=>`<b>${esc(s.doc_id)}</b>(${s.score})`).join(' · ')||'无'}</div>
       <div class="meta">
         <span class="pill ${conf}">置信度 ${j.confidence?.label||'–'}</span>
+        ${grPill}
         <span class="pill">合成 ${j.synthesis_method||'–'}</span>
         <span class="pill code">trace ${esc(j.trace_id||'')}</span>
         <span class="pill">${j._ms||''}ms</span>
       </div>
+      ${(gr && !gr.passed) ? `<div class="src" style="color:#c96a00">护栏判定：${esc(gr.reason||'')}</div>` : ''}
     </div>`;
   $('chatMsgs').appendChild(m);
   scrollChat();
@@ -697,7 +715,7 @@ document.querySelectorAll('.sidebar nav button').forEach(b=>{
     ['kb','search','config','graph','agents'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
     if(tab==='config'){ loadConfig(); }
     if(tab==='graph'){ loadGraphStats(); loadGraphEntities(); graphNetEnsure(); }
-    if(tab==='agents'){ loadAgentStatus(); }
+    if(tab==='agents'){ loadAgentStatus(); loadAudit(); }
   };
 });
 
@@ -995,6 +1013,11 @@ async function agentAsk(){
   const routing = ag.routing || {};
   const conf = j.confidence?.label || '–';
   const paths = j.graph_paths || [];
+  const gr = j.guardrail;
+  const grPill = (gr && !gr.passed)
+    ? `<span class="pill" style="background:#fff4e5;color:#c96a00;border:1px solid #f2c48d">⚠ 需人工复核</span>`
+    : '';
+  const grLine = (gr && !gr.passed) ? `<div class="src" style="color:#c96a00;margin-top:4px">护栏判定：${esc(gr.reason||'')}</div>` : '';
   $('agResult').innerHTML = `
     <div class="btext" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(j.answer||'(无答复)')}</div>
     ${paths.length ? '<div class="src" style="margin-top:8px">关系路径：<br>' + paths.map(p=>esc(p)).join('<br>') + '</div>' : ''}
@@ -1003,14 +1026,36 @@ async function agentAsk(){
       ${renderAgentTrace(ag.trace)}
       <div class="meta" style="margin-top:8px">
         <span class="pill ${conf==='高'?'high':conf==='中'?'mid':'low'}">置信度 ${conf}</span>
+        ${grPill}
         <span class="pill">合成 ${esc(j.synthesis_method||'–')}</span>
         <span class="pill code">trace ${esc(j.trace_id||'')}</span>
         <span class="pill">${ms}ms</span>
       </div>
+      ${grLine}
     </div>`;
 }
 $('agentRefresh').onclick = loadAgentStatus;
 $('agAskBtn').onclick = agentAsk;
+
+// ===== P1-5 审计日志面板 =====
+async function loadAudit(){
+  let j;
+  try{ j = await (await fetch('/api/audit')).json(); }
+  catch(e){ $('auditList').innerHTML = '<div class="empty">加载失败：'+esc(String(e))+'</div>'; return; }
+  const es = j.entries || [];
+  if(!es.length){ $('auditList').innerHTML = '<div class="empty">暂无记录——先在任意页面提几个问题。</div>'; return; }
+  $('auditList').innerHTML = es.map(e=>{
+    const gr = e.guardrail;
+    const flagged = gr && gr.passed === false;
+    const conf = e.confidence || {};
+    const confTxt = conf.label ? `${conf.label} ${conf.score!=null?'('+conf.score+')':''}` : '–';
+    return `<div class="docrow"><div class="meta">
+      <div class="id">${esc(e.question||'')} ${flagged?'<span style="color:#c96a00">⚠ 需人工复核</span>':''}</div>
+      <div class="pv">${esc(e.ts||'')} · ${esc(e.agent_mode||'')} · 合成 ${esc(e.synthesis_method||'–')} · 耗时 ${e.latency_ms||0}ms</div></div>
+      <span class="badge" style="${flagged?'background:#fff4e5;color:#c96a00':''}">置信度 ${esc(confTxt)}</span></div>`;
+  }).join('');
+}
+$('auditRefresh').onclick = loadAudit;
 
 // ===== 接口配置面板（傻瓜化）=====
 const CFG_FIELDS = [
@@ -1018,7 +1063,8 @@ const CFG_FIELDS = [
   "KB_API_TIMEOUT","KB_API_TTL",
   "KB_ORDER_API_URL","KB_ORDER_PATH_TPL","KB_ORDER_STATUS_PATH","KB_ORDER_CARRIER_PATH","KB_ORDER_ETA_PATH","KB_ORDER_TEST_ID",
   "KB_INVENTORY_API_URL","KB_INVENTORY_PATH_TPL","KB_INVENTORY_STOCK_PATH","KB_INVENTORY_WAREHOUSE_PATH","KB_INVENTORY_TEST_SKU",
-  "KB_LLM_PROVIDER","KB_LLM_MODEL","KB_LLM_BASE_URL","KB_LLM_API_KEY"
+  "KB_LLM_PROVIDER","KB_LLM_MODEL","KB_LLM_BASE_URL","KB_LLM_API_KEY",
+  "KB_GUARDRAIL_MIN_CONFIDENCE"
 ];
 let _cfgKeySet = false, _llmKeySet = false;
 
