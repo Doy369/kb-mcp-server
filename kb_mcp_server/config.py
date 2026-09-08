@@ -67,6 +67,12 @@ class Settings(BaseModel):
     rate_limit: int = int(os.getenv("KB_RATE_LIMIT", "0"))  # 每 IP 每分钟最大请求数；0=不限流
     log_file: str = os.getenv("KB_LOG_FILE", "")            # 结构化访问日志文件路径；空=仅 stdout
 
+    # 跨域白名单（前端部署在 GitHub Pages 等独立域名时配；逗号分隔）。
+    # 默认空=仅同源；部署到 https://<user>.github.io/kb-mcp-server 时填完整 origin。
+    cors_origins: list[str] = [
+        o.strip() for o in os.getenv("KB_CORS_ORIGINS", "").split(",") if o.strip()
+    ]
+
 
 _settings: "Settings | None" = None
 

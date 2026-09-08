@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="zh-CN" data-page-node-id="jdZ78m9UkAMRUurVT7GFzm">
+<head data-page-node-id="KfkKXikrZ6dh5vUpGTQ6od">
+<meta charset="UTF-8" data-page-node-id="Z3xDzpvVMVoTMQ8KrtQau2" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="belBM7H4mT3Yeqaks8JJGR" />
 <title>知识库控制台 · KB MCP Server</title>
 <style>
   :root{
@@ -141,348 +141,354 @@
     border-radius:10px;padding:8px 12px;font-size:12.5px;margin-bottom:10px;display:flex;gap:8px;align-items:center}
 </style>
 </head>
-<body>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="brand">知识库控制台<div class="sub">KB MCP Server · 可调用外部 API 的知识库</div></div>
-    <div class="status" id="status"><span class="tag gray">加载中…</span></div>
-    <nav>
-      <button data-view="kb" class="active">📚 知识库</button>
-      <button data-view="search">🔍 检索 · 指标</button>
-      <button data-view="graph">🕸 知识图谱</button>
-      <button data-view="agents">🤝 Agent 协作</button>
-      <button data-view="config">⚙ 接口配置</button>
+<body data-page-node-id="LkCVyEvW1h7E75iRzYEFTV">
+<div class="layout" data-page-node-id="qhIpOcE2OlHiOXoNZVS0zX">
+  <aside class="sidebar" data-page-node-id="YhY3hwny4GMoBEKziHbBJl">
+    <div class="brand" data-page-node-id="VQF7AVAz2RwZtX5EAxrLK7">知识库控制台<div class="sub" data-page-node-id="FbLnGxL5LXDtrLXjlnd2Mh">KB MCP Server · 可调用外部 API 的知识库</div></div>
+    <div class="status" id="status" data-page-node-id="lzTvOXm7BZ5Gpwmjit79rg"><span class="tag gray" data-page-node-id="XRkn9Wis7z1notS9up12qG">加载中…</span></div>
+    <nav data-page-node-id="wWos5NXaOrtZqDE9C9seXW">
+      <button data-view="kb" class="active" data-page-node-id="KT0BsS91GFTRYohsL0VGZo">📚 知识库</button>
+      <button data-view="search" data-page-node-id="CE13FVh32idfQyDLkjveLt">🔍 检索 · 指标</button>
+      <button data-view="graph" data-page-node-id="x0jWX6GDSFCcbgJ8zq8pBf">🕸 知识图谱</button>
+      <button data-view="agents" data-page-node-id="iBrteMlvcuJrxCLYFjebr9">🤝 Agent 协作</button>
+      <button data-view="config" data-page-node-id="EUuirhdPv4a2HFz6JzCMBN">⚙ 接口配置</button>
     </nav>
-    <div class="foot">本地私有化 · 离线可跑<br>存储 / 嵌入可切换</div>
+    <div class="foot" data-page-node-id="t8tEEGGku7SlXTlP3FanG9">本地私有化 · 离线可跑<br data-page-node-id="W7dYQrB240Fgc3DSnbUyOx">存储 / 嵌入可切换</div>
   </aside>
 
-  <main class="content">
+  <main class="content" data-page-node-id="gK9P2HYqTyBVdH4Acu4Yip">
   <!-- ============ 知识库 ============ -->
-  <section id="tab-kb" class="card pad-top">
-    <div class="grid2">
-      <div>
-        <h2><span class="dot"></span>知识摄取</h2>
-        <label>文档 ID</label>
-        <input type="text" id="docId" placeholder="如 faq_returns" />
-        <label>文档内容（自动切片 + 本地嵌入）</label>
+  <section id="tab-kb" class="card pad-top" data-page-node-id="8YBBWKCSXufxnTvgb7oAMt">
+    <div class="grid2" data-page-node-id="eK583c7fprz1GbI5yuv0Se">
+      <div data-page-node-id="VhOkwebbIEZQdn92KekS4l">
+        <h2 data-page-node-id="eQQDcKxYrlMNSnsbd4ttIc"><span class="dot" data-page-node-id="DO1IIUL4JTDaMoxtnTog1K"></span>知识摄取</h2>
+        <label data-page-node-id="35xgHl4wzskVoTbp1XCZK8">文档 ID</label>
+        <input type="text" id="docId" placeholder="如 faq_returns" data-page-node-id="L6PE3uFS56A9PlXfNfiDst" />
+        <label data-page-node-id="A91Lyt02XlTXJAj6LJ0Gov">文档内容（自动切片 + 本地嵌入）</label>
         <textarea id="docText" placeholder="粘贴一段知识库文本…"></textarea>
-        <div class="row" style="margin-top:10px">
-          <button id="ingestBtn">提交入库</button>
-          <button class="ghost btn-sm" id="sampleBtn">载入示例 FAQ</button>
-          <span class="spacer"></span>
-          <span class="hint" id="ingestHint"></span>
+        <div class="row" style="margin-top:10px" data-page-node-id="O0PaWAK0t7APbWaNCtMs11">
+          <button id="ingestBtn" data-page-node-id="IexTDbSkrFzVPKdCNjZYic">提交入库</button>
+          <button class="ghost btn-sm" id="sampleBtn" data-page-node-id="1RxnEyjmvE5BtH9esxpZFT">载入示例 FAQ</button>
+          <span class="spacer" data-page-node-id="HbpcWpGNpd6DpRfe3H8Sna"></span>
+          <span class="hint" id="ingestHint" data-page-node-id="Fl5KgOADQM3FzLUoeg8TET"></span>
         </div>
-        <div style="margin-top:16px;border-top:1px dashed var(--line);padding-top:14px">
-          <h2><span class="dot"></span>批量提交（文件夹 / 文件）</h2>
-          <div class="row">
-            <button class="ghost btn-sm" id="pickFolderBtn">选择文件夹</button>
-            <button class="ghost btn-sm" id="pickFilesBtn">选择文件</button>
-            <input type="file" id="folderInput" webkitdirectory directory multiple hidden />
-            <input type="file" id="filesInput" multiple hidden />
+        <div style="margin-top:16px;border-top:1px dashed var(--line);padding-top:14px" data-page-node-id="nGKOUyz9aZiHJD85EksbLD">
+          <h2 data-page-node-id="MeeH9U6E4UszgOtHgsySz9"><span class="dot" data-page-node-id="SPRNo2GhJwgSj2a62lxl4j"></span>批量提交（文件夹 / 文件）</h2>
+          <div class="row" data-page-node-id="o6OTgCkZMR4QsjNYFtYPIi">
+            <button class="ghost btn-sm" id="pickFolderBtn" data-page-node-id="sUx077WwBTUpYKmmTalspl">选择文件夹</button>
+            <button class="ghost btn-sm" id="pickFilesBtn" data-page-node-id="tSgjHKPthnKK8pKMreu8jz">选择文件</button>
+            <input type="file" id="folderInput" webkitdirectory directory multiple hidden data-page-node-id="5e03ThQxCndJUaGi6FDXtk" />
+            <input type="file" id="filesInput" multiple hidden data-page-node-id="Ulx01lTsRYOZ4zlBONhbY0" />
           </div>
-          <div class="row" style="margin-top:8px">
-            <input type="text" id="folderPath" placeholder="或输入文件夹绝对路径，如 D:/docs/kb" style="flex:1" />
-            <button id="importPathBtn">按路径导入</button>
+          <div class="row" style="margin-top:8px" data-page-node-id="GnCa3TfAFvOuMjngeJmwJT">
+            <input type="text" id="folderPath" placeholder="或输入文件夹绝对路径，如 D:/docs/kb" style="flex:1" data-page-node-id="nUveWtdCIbjHKYEVYcS81W" />
+            <button id="importPathBtn" data-page-node-id="wLj45V8K5iRnRXvr6oAi2d">按路径导入</button>
           </div>
-          <div class="hint" id="batchHint" style="margin-top:6px">支持 .md/.txt/.docx（.pdf 需后端 pypdf）。选文件夹走浏览器上传；填路径走服务端扫描。</div>
-          <div class="doclist" id="batchList" style="margin-top:8px;max-height:170px"></div>
+          <div class="hint" id="batchHint" style="margin-top:6px" data-page-node-id="5JajHiOadR24EALPPkLTpJ">支持 .md/.txt/.docx（.pdf 需后端 pypdf）。选文件夹走浏览器上传；填路径走服务端扫描。</div>
+          <div class="doclist" id="batchList" style="margin-top:8px;max-height:170px" data-page-node-id="W83eJMpIBMhuQDRychTBo4"></div>
         </div>
       </div>
-      <div>
-        <h2><span class="dot"></span>文档管理 <span class="spacer"></span>
-          <button class="ghost btn-sm" id="docRefresh">刷新</button></h2>
-        <div class="doclist" id="docList"><div class="empty">暂无文档，请先摄取。</div></div>
+      <div data-page-node-id="Fp5zGlMHZiPEpC6902f3p8">
+        <h2 data-page-node-id="Rgue1hkWArZE66o2wE5ALj"><span class="dot" data-page-node-id="RsOF9iIpb5FNFeq4CQwtSh"></span>文档管理 <span class="spacer" data-page-node-id="hfYa1E6rAV3dShTSMPasDe"></span>
+          <button class="ghost btn-sm" id="docRefresh" data-page-node-id="aLYelvv2MSYLN7UX8etxjy">刷新</button></h2>
+        <div class="doclist" id="docList" data-page-node-id="n9YJBo43pFJjVNOEpE7BoF"><div class="empty" data-page-node-id="FAt0bE6cTJg1y5xRKd433S">暂无文档，请先摄取。</div></div>
       </div>
     </div>
   </section>
 
   <!-- ============ 检索 · 指标 ============ -->
-  <section id="tab-search" class="card pad-top hidden">
-    <div class="grid2">
-      <div>
-        <h2><span class="dot"></span>混合检索</h2>
-        <label>检索问题</label>
-        <input type="text" id="q" placeholder="如：退货退款要几天？" />
-        <div class="row" style="margin-top:10px">
-          <label style="margin:0">Top-K</label>
-          <input type="text" id="topk" value="3" style="width:60px" />
-          <label style="margin:0 0 0 10px">模式</label>
-          <select id="mode" style="width:110px">
-            <option value="hybrid">混合</option>
-            <option value="vector">向量</option>
+  <section id="tab-search" class="card pad-top hidden" data-page-node-id="DvT230iNCZejl9zG9JBoid">
+    <div class="grid2" data-page-node-id="UDDLDDv33uNvy19ECqEjoW">
+      <div data-page-node-id="obrpIqoK1lnDPgFZN3K8J6">
+        <h2 data-page-node-id="h6CmlREu9BGDmglkx47Lop"><span class="dot" data-page-node-id="4Pi0FQvA5taQsqUCT8E0BI"></span>混合检索</h2>
+        <label data-page-node-id="O3ZkFFR7gkLHA8H8Xp09oE">检索问题</label>
+        <input type="text" id="q" placeholder="如：退货退款要几天？" data-page-node-id="zaOmyWf1SmNThSoaGeI83A" />
+        <div class="row" style="margin-top:10px" data-page-node-id="bFdz3AZEWW67MitFcWzVlq">
+          <label style="margin:0" data-page-node-id="LwueG8waleSZiI5QQ4eEdY">Top-K</label>
+          <input type="text" id="topk" value="3" style="width:60px" data-page-node-id="KkegZnd5Adl9SLzCzc80Jw" />
+          <label style="margin:0 0 0 10px" data-page-node-id="sCrGRYxSr1c9X6n3gseRhT">模式</label>
+          <select id="mode" style="width:110px" data-page-node-id="Z5du3AwH7NGVvCyjAA1Lo5">
+            <option value="hybrid" data-page-node-id="pSEM2GJAACM1su8UlW3UTd">混合</option>
+            <option value="vector" data-page-node-id="RxBQspl3hfMpf19CHUZ8WW">向量</option>
           </select>
-          <button id="searchBtn">检索</button>
-          <span class="spacer"></span>
-          <span class="hint" id="searchHint"></span>
+          <button id="searchBtn" data-page-node-id="Fm1hvJa2voaEOyja6ZHmF7">检索</button>
+          <span class="spacer" data-page-node-id="gXPJHqDd5BhM9QCLfgq1nf"></span>
+          <span class="hint" id="searchHint" data-page-node-id="xx0zkg6D7WukIcWxxtQ25Y"></span>
         </div>
-        <div class="result" id="searchResult"><div class="empty">输入问题开始检索。</div></div>
+        <div class="result" id="searchResult" data-page-node-id="DDxqpFnYcsjhrz4FRPF8ty"><div class="empty" data-page-node-id="d8EHhrpgYQacD6oyLSFNAu">输入问题开始检索。</div></div>
       </div>
-      <div>
-        <h2><span class="dot"></span>调用指标 <span class="spacer"></span>
-          <button class="ghost btn-sm" id="metricsBtn">刷新</button></h2>
-        <div class="metrics" id="metrics">
-          <div class="metric"><div class="n" id="mTotal">–</div><div class="l">总请求</div></div>
-          <div class="metric"><div class="n" id="mAsk">–</div><div class="l">问答(含实时)</div></div>
-          <div class="metric"><div class="n" id="mErr">–</div><div class="l">错误</div></div>
-          <div class="metric"><div class="n" id="mUp">–</div><div class="l">运行时长(s)</div></div>
+      <div data-page-node-id="xEwUuLoV743EK7KckjIYz5">
+        <h2 data-page-node-id="qo56oKTFAzvZp6XpIZRyC7"><span class="dot" data-page-node-id="tRZQFwrjllpCuB6R5F6w6V"></span>调用指标 <span class="spacer" data-page-node-id="3NvLgK0c7Dt0DfPmsFy5bn"></span>
+          <button class="ghost btn-sm" id="metricsBtn" data-page-node-id="KpijieJDspjARu2sOefIxg">刷新</button></h2>
+        <div class="metrics" id="metrics" data-page-node-id="mWXI7Bk8IXEzE9QQWB3971">
+          <div class="metric" data-page-node-id="vjuTjZEAJiLzsEQXnNRq4m"><div class="n" id="mTotal" data-page-node-id="A7hqKmFnrMWFzA3OTLXs4H">–</div><div class="l" data-page-node-id="6BxNSxymfQrGbTluJOs9fv">总请求</div></div>
+          <div class="metric" data-page-node-id="vyEORCompOcAwAYA41NuUd"><div class="n" id="mAsk" data-page-node-id="FmmO7yOETBmLTJWQoadMlj">–</div><div class="l" data-page-node-id="MWV25UFNheiHiBthN1en3K">问答(含实时)</div></div>
+          <div class="metric" data-page-node-id="pYcH8McV0qy9sV2d9j61ts"><div class="n" id="mErr" data-page-node-id="FjYWMJtxc6IvoOwV3d9dYm">–</div><div class="l" data-page-node-id="UAh9s6D6CqPCB57b0rQhIz">错误</div></div>
+          <div class="metric" data-page-node-id="kgWsUPzQTCBzqqIpwujh2y"><div class="n" id="mUp" data-page-node-id="uYkOhOhH1HyOyXwmXGhN6j">–</div><div class="l" data-page-node-id="GHf1CJWKPVURzHFJ2ZXJSH">运行时长(s)</div></div>
         </div>
-        <div class="src" id="mEp" style="margin-top:10px"></div>
+        <div class="src" id="mEp" style="margin-top:10px" data-page-node-id="IQwYAdDBkJqIglWpTWyJds"></div>
       </div>
     </div>
   </section>
   <!-- ============ 知识图谱 ============ -->
-  <section id="tab-graph" class="card pad-top hidden">
-    <div class="grid2">
-      <div>
-        <h2><span class="dot"></span>图谱概况 <span class="spacer"></span>
-          <button class="ghost btn-sm" id="graphRefresh">刷新</button>
-          <button class="ghost btn-sm" id="graphRebuild">重建图谱</button></h2>
-        <div class="metrics" id="graphMetrics">
-          <div class="metric"><div class="n" id="gNodes">–</div><div class="l">实体节点</div></div>
-          <div class="metric"><div class="n" id="gEdges">–</div><div class="l">关系边</div></div>
-          <div class="metric"><div class="n" id="gBackend">–</div><div class="l">图后端</div></div>
-          <div class="metric"><div class="n" id="gTypes">–</div><div class="l">实体类型</div></div>
+  <section id="tab-graph" class="card pad-top hidden" data-page-node-id="1dZZWeqaelxFwJ4P47CCOG">
+    <div class="grid2" data-page-node-id="YFZpUo5Lzum0unVWdwMhqc">
+      <div data-page-node-id="deU1XPVlnfXyCFvSOfHTGv">
+        <h2 data-page-node-id="JJ5Upu8gsomd32jNTccpHt"><span class="dot" data-page-node-id="QEEAE9ux4Cl72omLQk2T14"></span>图谱概况 <span class="spacer" data-page-node-id="FN3qSLruD3hKaTzKcVLzro"></span>
+          <button class="ghost btn-sm" id="graphRefresh" data-page-node-id="PB2lduJCwmgrFoRqOLbG31">刷新</button>
+          <button class="ghost btn-sm" id="graphRebuild" data-page-node-id="CQ1ai1CknbbfG2XHyNzAXM">重建图谱</button></h2>
+        <div class="metrics" id="graphMetrics" data-page-node-id="HvxkORMRDoUtcXnEEqY1Az">
+          <div class="metric" data-page-node-id="tg8Cn6XnGZKifnBN07ew0j"><div class="n" id="gNodes" data-page-node-id="ZQzzeViIZ9LMuWoULosi6A">–</div><div class="l" data-page-node-id="SqGKlLvS7H1nUqUBTQpna5">实体节点</div></div>
+          <div class="metric" data-page-node-id="PphqPNGLZcw3unaTL5Xb1m"><div class="n" id="gEdges" data-page-node-id="WxdD0EE66at3o7vbaigHSD">–</div><div class="l" data-page-node-id="S8wknZgHvQ20TGDoFvK9LD">关系边</div></div>
+          <div class="metric" data-page-node-id="SFEEyS9xknpVjxUM4TEDI9"><div class="n" id="gBackend" data-page-node-id="hyN0yjfSfKQRgMsNTqzkqO">–</div><div class="l" data-page-node-id="BE85co45gODLEbBVZPt0hN">图后端</div></div>
+          <div class="metric" data-page-node-id="4iIHx2FWkQDF0qwllnnoUz"><div class="n" id="gTypes" data-page-node-id="2kxLsNBzWcRh9gwA7Qc1cD">–</div><div class="l" data-page-node-id="PCVe4RZI53O52e3aScw1TW">实体类型</div></div>
         </div>
-        <div class="src" id="graphByType" style="margin-top:10px"></div>
-        <div class="hint" id="graphHint" style="margin-top:6px">摄取文档时自动抽取三元组入图；换本体后可「重建图谱」。</div>
-        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
-          <h2><span class="dot"></span>实体列表</h2>
-          <div class="row">
-            <select id="gTypeFilter" style="width:140px">
-              <option value="">全部类型</option>
-              <option value="IssueCategory">问题类别</option>
-              <option value="SLAClause">SLA 条款</option>
-              <option value="Solution">解决方案</option>
-              <option value="Product">产品</option>
-              <option value="RootCause">根因</option>
-              <option value="Ticket">工单</option>
-              <option value="Customer">客户</option>
-              <option value="Document">文档</option>
+        <div class="src" id="graphByType" style="margin-top:10px" data-page-node-id="DtlFnGFCxmyVXPuSBREjNz"></div>
+        <div class="hint" id="graphHint" style="margin-top:6px" data-page-node-id="AjTqqtKEkY4GNCMxQgDanK">摄取文档时自动抽取三元组入图；换本体后可「重建图谱」。</div>
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px" data-page-node-id="MznOBZTU0uHzmx2uIjBBVL">
+          <h2 data-page-node-id="bMcjo2InSsGc3qXHfo9Gg7"><span class="dot" data-page-node-id="u4HIJtGAt7KSEkJrkRGMDF"></span>实体列表</h2>
+          <div class="row" data-page-node-id="RU2BEXYGpnWDPKIj7bOOf6">
+            <select id="gTypeFilter" style="width:140px" data-page-node-id="6360sFrT17ARHyQV1BrbeJ">
+              <option value="" data-page-node-id="ny9lXtgOA5JhR1vXxuF3u6">全部类型</option>
+              <option value="IssueCategory" data-page-node-id="d07jOzlqGYIsOybS9tATp7">问题类别</option>
+              <option value="SLAClause" data-page-node-id="rIQHuVrgCYxySXYQEXCEnR">SLA 条款</option>
+              <option value="Solution" data-page-node-id="cUkUy7Qixj4BAaOBkYeIi4">解决方案</option>
+              <option value="Product" data-page-node-id="L2yCXTJg83cs99qDmAfHBr">产品</option>
+              <option value="RootCause" data-page-node-id="Jhmg2do11eWS3xcv9ju9G2">根因</option>
+              <option value="Ticket" data-page-node-id="4osWDI92n3X2gd212qVg30">工单</option>
+              <option value="Customer" data-page-node-id="3Pta7XXo1v4A9twns6MWGA">客户</option>
+              <option value="Document" data-page-node-id="hfVz5bamhgJTStUreCcE3Z">文档</option>
             </select>
-            <input type="text" id="gNameFilter" placeholder="按名称筛选" style="flex:1" />
-            <button id="gEntityBtn">查询</button>
+            <input type="text" id="gNameFilter" placeholder="按名称筛选" style="flex:1" data-page-node-id="IolmChbEqD7JX62bWDwy6n" />
+            <button id="gEntityBtn" data-page-node-id="eOJuRZrcA5lyZbhLHHTLVY">查询</button>
           </div>
-          <div class="doclist" id="gEntityList" style="margin-top:8px;max-height:230px"><div class="empty">暂无实体</div></div>
+          <div class="doclist" id="gEntityList" style="margin-top:8px;max-height:230px" data-page-node-id="ldJOCfkM6RVzrzfmyo8VXQ"><div class="empty" data-page-node-id="Nicd0nTDKXilTEzCh6oKg3">暂无实体</div></div>
         </div>
       </div>
-      <div>
-        <h2><span class="dot"></span>多跳查询（路径即证据）</h2>
-        <label>实体名称（点左侧实体可直接查询）</label>
-        <div class="row">
-          <input type="text" id="gEntity" placeholder="如 物流配送" style="flex:1" />
-          <select id="gDepth" style="width:80px">
-            <option value="1">1 跳</option>
-            <option value="2" selected>2 跳</option>
-            <option value="3">3 跳</option>
+      <div data-page-node-id="H1wPsfPjQePnA1M4fEdtPJ">
+        <h2 data-page-node-id="OPc1dgIB662jshpwKClvhZ"><span class="dot" data-page-node-id="YsamnqUmCvWPq71FgkGld1"></span>多跳查询（路径即证据）</h2>
+        <label data-page-node-id="1sKdJyMqEqQaJPVkxOnoc7">实体名称（点左侧实体可直接查询）</label>
+        <div class="row" data-page-node-id="ccR4xMkuoPR51NKMWuiQ99">
+          <input type="text" id="gEntity" placeholder="如 物流配送" style="flex:1" data-page-node-id="5lYP2P7PIFjnTAlog9SnRQ" />
+          <select id="gDepth" style="width:80px" data-page-node-id="ruCSwIy0CsGo4lUu7DnBoZ">
+            <option value="1" data-page-node-id="7NnuW8qvviid1GrHUSZZv4">1 跳</option>
+            <option value="2" selected data-page-node-id="SrVujH5eHWmtf090CHTiNH">2 跳</option>
+            <option value="3" data-page-node-id="0QlRM0yUcVLeu62OaTxyrA">3 跳</option>
           </select>
-          <select id="gDirection" style="width:84px">
-            <option value="out">出边</option>
-            <option value="in">入边</option>
-            <option value="both" selected>双向</option>
+          <select id="gDirection" style="width:84px" data-page-node-id="gBN9QjNYNWpIbIIex6k1DG">
+            <option value="out" data-page-node-id="VqxjEXkzMbbfIjS4cSOnvt">出边</option>
+            <option value="in" data-page-node-id="N7pDszY4uFReJBXw3ElNba">入边</option>
+            <option value="both" selected data-page-node-id="a2A948tKw7gTi00WBOQIKP">双向</option>
           </select>
-          <button id="gQueryBtn">查询</button>
+          <button id="gQueryBtn" data-page-node-id="wjcF7MbnyI7S6jk3xgKbbP">查询</button>
         </div>
-        <div class="result" id="gQueryResult" style="margin-top:10px"><div class="empty">选择实体开始查询。</div></div>
-        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px">
-          <h2><span class="dot"></span>从问题展开（关系侧召回）</h2>
-          <div class="row">
-            <input type="text" id="gQuestion" placeholder="如：物流超时怎么赔偿" style="flex:1" />
-            <button id="gExpandBtn">展开</button>
+        <div class="result" id="gQueryResult" style="margin-top:10px" data-page-node-id="7rRB5aPS0rSvCcqTq72AEh"><div class="empty" data-page-node-id="0VzqJG6HJVMnY61m0yNZ3X">选择实体开始查询。</div></div>
+        <div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:12px" data-page-node-id="4wBr8KCTBrglmuboqid33S">
+          <h2 data-page-node-id="pumhy8gtNTlPCzzFwS8HPy"><span class="dot" data-page-node-id="u0zRfAgRFydjlNsJiLGJQj"></span>从问题展开（关系侧召回）</h2>
+          <div class="row" data-page-node-id="kPNqiPbbPMTDB2RqjmNyoP">
+            <input type="text" id="gQuestion" placeholder="如：物流超时怎么赔偿" style="flex:1" data-page-node-id="lJFRCPCGbRkaPPGOCOq0uh" />
+            <button id="gExpandBtn" data-page-node-id="5bG5dMqinjv2nla04HUcLk">展开</button>
           </div>
-          <div class="result" id="gExpandResult" style="margin-top:8px"><div class="empty">输入问题，查看图谱召回的关系事实。</div></div>
+          <div class="result" id="gExpandResult" style="margin-top:8px" data-page-node-id="CQIBtd1kqiZGyAtO9lZ7ng"><div class="empty" data-page-node-id="ujC6ynIgJ5JCxvMo8q6S0Q">输入问题，查看图谱召回的关系事实。</div></div>
         </div>
       </div>
     </div>
 
-    <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:14px">
-      <h2><span class="dot"></span>图谱网络（节点=实体 · 连线=关系）<span class="spacer"></span>
-        <button class="ghost btn-sm" id="graphNetLoad">加载 / 刷新网络</button></h2>
-      <div class="hint">颜色区分实体类型；拖动节点调整布局，悬停高亮相邻关系，滚轮缩放、拖拽空白平移。</div>
-      <div id="graphNetWrap" style="position:relative;width:100%;height:480px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)">
-        <svg id="graphNet" width="100%" height="100%" style="display:block;cursor:grab;touch-action:none"></svg>
-        <div id="graphNetTip" style="display:none;position:absolute;pointer-events:none;background:rgba(0,0,0,.78);color:#fff;padding:6px 9px;border-radius:6px;font-size:12px;max-width:280px;z-index:5;line-height:1.5"></div>
+    <div style="margin-top:18px;border-top:1px dashed var(--line);padding-top:14px" data-page-node-id="73hZEHUL35SABswR9FsTku">
+      <h2 data-page-node-id="zG9ZlptUksYoDVAGUmRHDE"><span class="dot" data-page-node-id="0kK5T1V6RgE0Dzt1McbGSq"></span>图谱网络（节点=实体 · 连线=关系）<span class="spacer" data-page-node-id="kv4c2Nfo2GdGdO1ExPnWaC"></span>
+        <button class="ghost btn-sm" id="graphNetLoad" data-page-node-id="PZEQWRQdl9UdMksY59js26">加载 / 刷新网络</button></h2>
+      <div class="hint" data-page-node-id="foousZrdQRRwOVn24I3qCp">颜色区分实体类型；拖动节点调整布局，悬停高亮相邻关系，滚轮缩放、拖拽空白平移。</div>
+      <div id="graphNetWrap" style="position:relative;width:100%;height:480px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)" data-page-node-id="3OsROqmmj6I4eOsOJWKju2">
+        <svg id="graphNet" width="100%" height="100%" style="display:block;cursor:grab;touch-action:none" data-page-node-id="qDPE47minRBAf4nPw8DhOc"></svg>
+        <div id="graphNetTip" style="display:none;position:absolute;pointer-events:none;background:rgba(0,0,0,.78);color:#fff;padding:6px 9px;border-radius:6px;font-size:12px;max-width:280px;z-index:5;line-height:1.5" data-page-node-id="dY8v8GvkJEI7IkxUW8INYm"></div>
       </div>
     </div>
   </section>
 
   <!-- ============ Agent 协作 ============ -->
-  <section id="tab-agents" class="card pad-top hidden">
-    <div class="grid2">
-      <div>
-        <h2><span class="dot"></span>协作团队 <span class="spacer"></span>
-          <button class="ghost btn-sm" id="agentRefresh">刷新</button></h2>
-        <div class="hint" id="agentMode" style="margin-bottom:8px">编排模式：–</div>
-        <div class="doclist" id="agentList" style="max-height:300px"><div class="empty">加载中…</div></div>
-        <div class="hint" style="margin-top:8px">
+  <section id="tab-agents" class="card pad-top hidden" data-page-node-id="yElutSiEMcCyH2XexJdRUS">
+    <div class="grid2" data-page-node-id="WvT9t658sygwxe5zHeGHNE">
+      <div data-page-node-id="C1DDLPe2dQTocQ5uUm4z2F">
+        <h2 data-page-node-id="WsDrE7ZEOfh4otVF7oBhyR"><span class="dot" data-page-node-id="I4KWYMPPzGcp4CyMZYebby"></span>协作团队 <span class="spacer" data-page-node-id="HO77hL7G63HytTZjMId7oh"></span>
+          <button class="ghost btn-sm" id="agentRefresh" data-page-node-id="nSI6NEHLiL8RsXgQa3GpyX">刷新</button></h2>
+        <div class="hint" id="agentMode" style="margin-bottom:8px" data-page-node-id="xIzmgCDL9rwlR8NCsUNwAD">编排模式：–</div>
+        <div class="doclist" id="agentList" style="max-height:300px" data-page-node-id="c63Dfy3sizLLr9QPOz3ZUz"><div class="empty" data-page-node-id="lOK2aKp7cCbAiq8ejxvYEv">加载中…</div></div>
+        <div class="hint" style="margin-top:8px" data-page-node-id="Otf4W541Lgs3WL2IqpHwXN">
           编排：GraphBuilder（增量补图）→ [Retriever ∥ GraphReasoner ∥ LiveData] → Synthesizer。
           模式由 KB_AGENT_MODE 决定（deterministic 零 LLM / llm 本地路由）。
         </div>
       </div>
-      <div>
-        <h2><span class="dot"></span>协作问答（带 agent 轨迹）</h2>
-        <label>问题</label>
-        <div class="row">
+      <div data-page-node-id="i3uErZPipyp1Dh1Fg4bQVt">
+        <h2 data-page-node-id="HWPIWWBjnxgBO5AfBHKqUo"><span class="dot" data-page-node-id="4dN0zKAhAchQDlv2zr0NCi"></span>协作问答（带 agent 轨迹）</h2>
+        <label data-page-node-id="vagxXksCGiz3fELD8dlGLL">问题</label>
+        <div class="row" data-page-node-id="5tRVfXNozpiZrbBebvy874">
           <input type="text" id="agQ" placeholder="如：物流配送超时怎么赔偿" style="flex:1"
-                 onkeydown="if(event.key==='Enter')agentAsk()" />
-          <button id="agAskBtn">提问</button>
+                 onkeydown="if(event.key==='Enter')agentAsk()" data-page-node-id="xnvkFkxTkb2aEdcGfundpn" />
+          <button id="agAskBtn" data-page-node-id="Fd4fZUHsDlinkKQHdRV5Za">提问</button>
         </div>
-        <div class="row" style="margin-top:8px">
-          <label style="margin:0">订单号（可选）</label>
-          <input type="text" id="agOrder" placeholder="SO123" style="width:110px" />
-          <label style="margin:0 0 0 10px">SKU（可选）</label>
-          <input type="text" id="agSku" placeholder="SKU-1" style="width:110px" />
+        <div class="row" style="margin-top:8px" data-page-node-id="6O6EwjPYEXi4uVWz87PTKD">
+          <label style="margin:0" data-page-node-id="7XhbdeI4uugaCIfSJABQYS">订单号（可选）</label>
+          <input type="text" id="agOrder" placeholder="SO123" style="width:110px" data-page-node-id="EkqQhi6nHhYRD3oIgZYEA5" />
+          <label style="margin:0 0 0 10px" data-page-node-id="hol5Gomh3l66YFqnf3Q0rA">SKU（可选）</label>
+          <input type="text" id="agSku" placeholder="SKU-1" style="width:110px" data-page-node-id="hgdBaqwnfqYvRc9VFhyB59" />
         </div>
-        <div class="result" id="agResult" style="margin-top:10px"><div class="empty">提问后查看 agent 轨迹与协作答复。</div></div>
+        <div class="result" id="agResult" style="margin-top:10px" data-page-node-id="pEwQg84secFzSqt9YOd05E"><div class="empty" data-page-node-id="4aio72b15D18OSQdq37UxF">提问后查看 agent 轨迹与协作答复。</div></div>
       </div>
     </div>
 
     <!-- P1-5 审计日志 -->
-    <h2 style="margin-top:16px"><span class="dot"></span>审计日志（每次问答留痕） <span class="spacer"></span>
-      <button class="ghost btn-sm" id="auditRefresh">刷新</button></h2>
-    <div class="hint" style="margin-bottom:8px">每条问答自动落一条审计记录（时间 / 问题 / 置信度 / 护栏判定 / 耗时），只追加不删改——B2B 合规刚需。最近 50 条：</div>
-    <div class="doclist" id="auditList" style="max-height:260px"><div class="empty">加载中…</div></div>
+    <h2 style="margin-top:16px" data-page-node-id="HZYrHFiZCYZn8bBjygRGwt"><span class="dot" data-page-node-id="Nuzr8Hm8mFPrk1uGXNhqq9"></span>审计日志（每次问答留痕） <span class="spacer" data-page-node-id="GDSElJftTPc7R3WYqcqFxK"></span>
+      <button class="ghost btn-sm" id="auditRefresh" data-page-node-id="xuBw8jfYau2BZTLeBCM9IG">刷新</button></h2>
+    <div class="hint" style="margin-bottom:8px" data-page-node-id="UlAavu2rcigS3tbBMJSzbc">每条问答自动落一条审计记录（时间 / 问题 / 置信度 / 护栏判定 / 耗时），只追加不删改——B2B 合规刚需。最近 50 条：</div>
+    <div class="doclist" id="auditList" style="max-height:260px" data-page-node-id="01mJTwkkYjU6HTE0Gd6GAI"><div class="empty" data-page-node-id="OFeUDXOrXPWAdqZL9RF50e">加载中…</div></div>
   </section>
 
   <!-- ============ 接口配置 ============ -->
-  <section id="tab-config" class="card pad-top hidden">
-    <div class="grid2">
-      <div>
-        <h2><span class="dot"></span>接口配置（两步搞定）</h2>
-        <div class="banner">只需做两件事：① 让助手能查你公司的订单 / 库存（没有也可先用演示数据）；② 让回答更自然（可选）。全部保存即生效，不用改任何代码。</div>
+  <section id="tab-config" class="card pad-top hidden" data-page-node-id="5CKroh66GOLQTOqzMbhUN8">
+    <div class="grid2" data-page-node-id="E0gebXeZwHpibqnC5PC6Ul">
+      <div data-page-node-id="rpDITDxXRNSPMBrUg1xtor">
+        <h2 data-page-node-id="5k3DRXTbbD3JiiMAt1tG3B"><span class="dot" data-page-node-id="iWjLEa9M3R0qc9vRf5FJnB"></span>接口配置（两步搞定）</h2>
+        <div class="banner" data-page-node-id="ilLTNKK92hhSu5m4kps64V">只需做两件事：① 让助手能查你公司的订单 / 库存（没有也可先用演示数据）；② 让回答更自然（可选）。全部保存即生效，不用改任何代码。</div>
 
         <!-- 步骤① 公司系统 -->
-        <h2 style="margin-top:16px"><span class="dot"></span>① 连接公司系统（查订单 / 库存）</h2>
-        <label>你现在有真实订单 / 库存系统吗？</label>
-        <select id="KB_API_MOCK">
-          <option value="1">还没有，先用「演示数据」试试（推荐先这样）</option>
-          <option value="0">有，我要连接真实系统</option>
+        <h2 style="margin-top:16px" data-page-node-id="EYmsndqcTaUAbmCVd4178r"><span class="dot" data-page-node-id="Cyl3cxl2WN0zOZD4LUpMH7"></span>① 连接公司系统（查订单 / 库存）</h2>
+        <label data-page-node-id="swBBLO659vGttZjONYWRyC">你现在有真实订单 / 库存系统吗？</label>
+        <select id="KB_API_MOCK" data-page-node-id="pCfIcZGBTqreYuieS8Nn7r">
+          <option value="1" data-page-node-id="YGPMBttxxETEEXFBHol9Jw">还没有，先用「演示数据」试试（推荐先这样）</option>
+          <option value="0" data-page-node-id="PkfUMDvOAW4RGbWMnFQ4Nb">有，我要连接真实系统</option>
         </select>
 
-        <div id="liveBlock">
-          <p class="hint" style="margin-top:8px">把公司系统地址填下面，然后点【测试连接】，系统会自动认出「订单状态 / 承运商 / 到达时间」对应哪个字段——你不用懂代码。</p>
-          <label>订单系统地址</label>
-          <input type="text" id="KB_ORDER_API_URL" placeholder="如 http://订单系统地址 或 https://..." />
-          <label>订单号写在地址里的位置（一般不用改）</label>
-          <input type="text" id="KB_ORDER_PATH_TPL" placeholder="/orders/{id}" />
-          <label>库存系统地址</label>
-          <input type="text" id="KB_INVENTORY_API_URL" placeholder="如 http://库存系统地址" />
-          <label>SKU 写在地址里的位置（一般不用改）</label>
-          <input type="text" id="KB_INVENTORY_PATH_TPL" placeholder="/inventory/{id}" />
+        <div id="liveBlock" data-page-node-id="lEvhcUGl9Hi9x2wGFYwLp4">
+          <p class="hint" style="margin-top:8px" data-page-node-id="AFbI0O7Jyge0HSG38FAIg4">把公司系统地址填下面，然后点【测试连接】，系统会自动认出「订单状态 / 承运商 / 到达时间」对应哪个字段——你不用懂代码。</p>
+          <label data-page-node-id="LYi3kp09oWRS8L3GqME107">订单系统地址</label>
+          <input type="text" id="KB_ORDER_API_URL" placeholder="如 http://订单系统地址 或 https://..." data-page-node-id="SyVDM5yHbwoIDvtwBK3OZe" />
+          <label data-page-node-id="Ck0yxLlCakotPFFPlBJPWb">订单号写在地址里的位置（一般不用改）</label>
+          <input type="text" id="KB_ORDER_PATH_TPL" placeholder="/orders/{id}" data-page-node-id="NW7qrFSBuuzXmgbUMb06BS" />
+          <label data-page-node-id="mvHY4eMTFbIu7EIpkv58hS">库存系统地址</label>
+          <input type="text" id="KB_INVENTORY_API_URL" placeholder="如 http://库存系统地址" data-page-node-id="rfXPOcMGgcL0IGTlTffGQx" />
+          <label data-page-node-id="a4FQVQV84xcH2FsWdpzkNS">SKU 写在地址里的位置（一般不用改）</label>
+          <input type="text" id="KB_INVENTORY_PATH_TPL" placeholder="/inventory/{id}" data-page-node-id="FYnhh4m9krNfZFwFv4YqwP" />
 
-          <details class="cfg-adv" style="margin-top:12px">
-            <summary>登录验证（大多数系统需要，点开填）</summary>
-            <div style="padding-top:10px">
-              <label>验证方式</label>
-              <select id="KB_API_AUTH_SCHEME">
-                <option value="bearer">账号令牌（最常见，选这个）</option>
-                <option value="header">自定义请求头</option>
-                <option value="query">网址里带参数</option>
+          <details class="cfg-adv" style="margin-top:12px" data-page-node-id="JeFU7J3Z2AV5eupko7riAt">
+            <summary data-page-node-id="VZRfGlSD7gJXynicZJBSme">登录验证（大多数系统需要，点开填）</summary>
+            <div style="padding-top:10px" data-page-node-id="e7GIQHaQsrDi19zXof1PPD">
+              <label data-page-node-id="8G8BSb7NNvnYELeRfCLygJ">验证方式</label>
+              <select id="KB_API_AUTH_SCHEME" data-page-node-id="qYGlubv5C5Hj497YBZnPtw">
+                <option value="bearer" data-page-node-id="ejhTqb0VXXKeTVggFDBUGB">账号令牌（最常见，选这个）</option>
+                <option value="header" data-page-node-id="PfHRNJc9Mh1gfzROwmuSPo">自定义请求头</option>
+                <option value="query" data-page-node-id="uclkIJLAAEIoQ7B6s0mj7L">网址里带参数</option>
               </select>
-              <label>令牌 / Key（你公司系统给的）</label>
-              <input type="text" id="KB_API_KEY" placeholder="留空保持不变" autocomplete="off" />
-              <label>令牌头名称（仅「自定义请求头」时填）</label>
-              <input type="text" id="KB_API_AUTH_HEADER" placeholder="如 X-Api-Key" />
-              <label>令牌参数名（仅「网址参数」时填）</label>
-              <input type="text" id="KB_API_AUTH_QUERY" placeholder="如 apikey" />
-              <div class="row" style="margin-top:8px">
-                <div style="flex:1"><label>超时(秒)</label><input type="text" id="KB_API_TIMEOUT" value="5" /></div>
-                <div style="flex:1"><label>缓存(秒)</label><input type="text" id="KB_API_TTL" value="30" /></div>
+              <label data-page-node-id="go45p1sEmX6AdYFEuIGE19">令牌 / Key（你公司系统给的）</label>
+              <input type="text" id="KB_API_KEY" placeholder="留空保持不变" autocomplete="off" data-page-node-id="oknEYz1gxaXgiy2NOaVHC1" />
+              <label data-page-node-id="gh0HnnClcDVKUTa5BC6DIx">令牌头名称（仅「自定义请求头」时填）</label>
+              <input type="text" id="KB_API_AUTH_HEADER" placeholder="如 X-Api-Key" data-page-node-id="HJYEEJWrvc0WeZHOTxUNEv" />
+              <label data-page-node-id="N5n02ZcwLilohU3pLpwQSY">令牌参数名（仅「网址参数」时填）</label>
+              <input type="text" id="KB_API_AUTH_QUERY" placeholder="如 apikey" data-page-node-id="Q3hSWA0WFfUhU9Nq4G7Uj2" />
+              <div class="row" style="margin-top:8px" data-page-node-id="fhjSEakq85qo9ikQNgnclS">
+                <div style="flex:1" data-page-node-id="4vqlZs70oHJFKB5V450Wwl"><label data-page-node-id="9DJd4xZxmmE4UU6g6kIob7">超时(秒)</label><input type="text" id="KB_API_TIMEOUT" value="5" data-page-node-id="WpMNZ0zxnO0K1XcA0OrutA" /></div>
+                <div style="flex:1" data-page-node-id="Q3etSjPvLIUYUWTDZ7Ne5R"><label data-page-node-id="mp1iJxFiGevBuIGXg2antG">缓存(秒)</label><input type="text" id="KB_API_TTL" value="30" data-page-node-id="xRIz2ryBAcI7d3AAlkcfoD" /></div>
               </div>
             </div>
           </details>
 
-          <div class="row" style="margin-top:12px">
-            <div style="flex:1"><label>测试用订单号</label><input type="text" id="KB_ORDER_TEST_ID" placeholder="你公司一个真实订单号" /></div>
-            <div style="flex:1"><label>测试用 SKU</label><input type="text" id="KB_INVENTORY_TEST_SKU" placeholder="如 SKU-A100" /></div>
+          <div class="row" style="margin-top:12px" data-page-node-id="K8x1d374DzrBUES69I8KV5">
+            <div style="flex:1" data-page-node-id="vLy6eHZhne67n6nuXBznZA"><label data-page-node-id="Jx6eWUxdgE5BcQkufLnLaG">测试用订单号</label><input type="text" id="KB_ORDER_TEST_ID" placeholder="你公司一个真实订单号" data-page-node-id="etapFR42E6pDlkZMmBsO47" /></div>
+            <div style="flex:1" data-page-node-id="13YIdHRpBBrijMZpAreFtE"><label data-page-node-id="9DTXekyVCiyIe5jcoinQE4">测试用 SKU</label><input type="text" id="KB_INVENTORY_TEST_SKU" placeholder="如 SKU-A100" data-page-node-id="HNNkAsTp6PGVHCaRC5vsW5" /></div>
           </div>
           <!-- 字段映射由“测试连接”自动写入，文职无需手填，保留为隐藏输入供保存使用 -->
-          <input type="hidden" id="KB_ORDER_STATUS_PATH" />
-          <input type="hidden" id="KB_ORDER_CARRIER_PATH" />
-          <input type="hidden" id="KB_ORDER_ETA_PATH" />
-          <input type="hidden" id="KB_INVENTORY_STOCK_PATH" />
-          <input type="hidden" id="KB_INVENTORY_WAREHOUSE_PATH" />
-          <button id="cfgTest" style="margin-top:12px">测试连接并自动识别字段</button>
-          <div id="cfgTestResult" class="doclist" style="margin-top:10px"><div class="empty">点上面按钮，系统会连一次你的系统并显示结果。</div></div>
+          <input type="hidden" id="KB_ORDER_STATUS_PATH" data-page-node-id="qTGq7LfkerhhctCZMd6vdr" />
+          <input type="hidden" id="KB_ORDER_CARRIER_PATH" data-page-node-id="bFZk8eQliUPHBNw43hEgva" />
+          <input type="hidden" id="KB_ORDER_ETA_PATH" data-page-node-id="hTqeVZaHon1hw5OuppgafR" />
+          <input type="hidden" id="KB_INVENTORY_STOCK_PATH" data-page-node-id="nJQV4z6yHTFCP85xubG9zv" />
+          <input type="hidden" id="KB_INVENTORY_WAREHOUSE_PATH" data-page-node-id="xQhSAnjfO5wYTAgy90GnF2" />
+          <button id="cfgTest" style="margin-top:12px" data-page-node-id="7DjobbML8nFXLPmvMgZl8K">测试连接并自动识别字段</button>
+          <div id="cfgTestResult" class="doclist" style="margin-top:10px" data-page-node-id="u6FCQ7LWPzFm0GH7jXlOgT"><div class="empty" data-page-node-id="PPiOSli7IZRAnYz4P0P3X9">点上面按钮，系统会连一次你的系统并显示结果。</div></div>
         </div>
 
         <!-- 步骤② 模型 -->
-        <h2 style="margin-top:18px"><span class="dot"></span>② AI 智能回答（可选，更自然）</h2>
-        <p class="hint">不填也能用：助手会自动从知识库里摘取原文回答。想让回答更通顺自然，接一个大模型即可。</p>
-        <div class="row" style="margin:8px 0">
-          <button class="ghost btn-sm" id="useDeepseek">一键用 DeepSeek</button>
-          <button class="ghost btn-sm" id="useOpenai">OpenAI / 通义</button>
-          <button class="ghost btn-sm" id="useOllama">本地 Ollama</button>
+        <h2 style="margin-top:18px" data-page-node-id="A35P4nguE6I08EuLBqC32K"><span class="dot" data-page-node-id="68pvnk0ypO4uWG6InehXGr"></span>② AI 智能回答（可选，更自然）</h2>
+        <p class="hint" data-page-node-id="RtFfMxb1HDXHPBvGLmZrDX">不填也能用：助手会自动从知识库里摘取原文回答。想让回答更通顺自然，接一个大模型即可。</p>
+        <div class="row" style="margin:8px 0" data-page-node-id="NQXYOvuC6Vsa2vUPQr8oFQ">
+          <button class="ghost btn-sm" id="useDeepseek" data-page-node-id="jDZzFt2pUztEUiZb5rds33">一键用 DeepSeek</button>
+          <button class="ghost btn-sm" id="useOpenai" data-page-node-id="4euXSPGJD6M9uCQlL0Q5Wn">OpenAI / 通义</button>
+          <button class="ghost btn-sm" id="useOllama" data-page-node-id="jri4u0F1wa90vcJICIJ2UM">本地 Ollama</button>
         </div>
-        <label>用哪个模型服务</label>
-        <select id="KB_LLM_PROVIDER">
-          <option value="none">都不用（从知识库摘原文回答）</option>
-          <option value="openai">DeepSeek / OpenAI / 通义等</option>
-          <option value="ollama">本地 Ollama</option>
+        <label data-page-node-id="BHqEZGIx7DjTsPcjk8JtBA">用哪个模型服务</label>
+        <select id="KB_LLM_PROVIDER" data-page-node-id="NhastPpwYgkjO1GonQhL75">
+          <option value="none" data-page-node-id="BbF8EeBaBlFJ4y5ciB0TAp">都不用（从知识库摘原文回答）</option>
+          <option value="openai" data-page-node-id="OBKdgsrSBGsIfvIqmI8mWz">DeepSeek / OpenAI / 通义等</option>
+          <option value="ollama" data-page-node-id="Pqph7ZL0Ib8DpazvLiHMa5">本地 Ollama</option>
         </select>
-        <label>模型名称</label>
-        <input type="text" id="KB_LLM_MODEL" placeholder="如 deepseek-chat" />
-        <label>接口地址</label>
-        <input type="text" id="KB_LLM_BASE_URL" placeholder="如 https://api.deepseek.com/v1" />
-        <label>API Key（模型平台给的密钥）</label>
-        <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" />
+        <label data-page-node-id="XUCacZXXY9FEUuPYI9SIs2">模型名称</label>
+        <input type="text" id="KB_LLM_MODEL" placeholder="如 deepseek-chat" data-page-node-id="iCj80bHqYvf4ecLylm2iIq" />
+        <label data-page-node-id="pKAas86PrEQBcPVKcAGGta">接口地址</label>
+        <input type="text" id="KB_LLM_BASE_URL" placeholder="如 https://api.deepseek.com/v1" data-page-node-id="BdGN95A7XcINBW8Mc61ySC" />
+        <label data-page-node-id="sXcasaodfPcUT6LZIutxd1">API Key（模型平台给的密钥）</label>
+        <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" data-page-node-id="cJtRlwI0lr0xfnpQNRsdME" />
 
         <!-- ③ 答案护栏（P1-5） -->
-        <h2 style="margin-top:18px"><span class="dot"></span>③ 答案护栏（防止答非所问）</h2>
-        <p class="hint">置信度低于阈值的答复会自动标记「需人工复核」，不会静默放行。留空用默认（bge 嵌入 0.5 / 离线嵌入 0.2），填 0 关闭护栏。</p>
-        <label>最低置信度阈值（0 ~ 1 的小数）</label>
-        <input type="text" id="KB_GUARDRAIL_MIN_CONFIDENCE" placeholder="默认 0.5（bge）/ 0.2（离线）" />
+        <h2 style="margin-top:18px" data-page-node-id="a4lSIS11ntUSNSzNaAKVO7"><span class="dot" data-page-node-id="OE0j3sP8a5dQY8Nygmcw92"></span>③ 答案护栏（防止答非所问）</h2>
+        <p class="hint" data-page-node-id="8oJyqXcAxdQmSQrBAQydz6">置信度低于阈值的答复会自动标记「需人工复核」，不会静默放行。留空用默认（bge 嵌入 0.5 / 离线嵌入 0.2），填 0 关闭护栏。</p>
+        <label data-page-node-id="DuNlMDCdyhO207ARCr6sjJ">最低置信度阈值（0 ~ 1 的小数）</label>
+        <input type="text" id="KB_GUARDRAIL_MIN_CONFIDENCE" placeholder="默认 0.5（bge）/ 0.2（离线）" data-page-node-id="EFWfvy8tVkwA2Firx3xpQx" />
 
-        <div class="row" style="margin-top:16px">
-          <button id="cfgSave">保存并应用</button>
-          <span class="spacer"></span>
-          <span class="hint" id="cfgHint"></span>
+        <div class="row" style="margin-top:16px" data-page-node-id="HRlcARsFzjtyDBb2PvOxec">
+          <button id="cfgSave" data-page-node-id="RyGencTTyHVMdT5rjP28bi">保存并应用</button>
+          <span class="spacer" data-page-node-id="9O8Dp9c1t05s8RWHIMaRg5"></span>
+          <span class="hint" id="cfgHint" data-page-node-id="Aotr4JoDJ0x4Mw415zNPfA"></span>
         </div>
       </div>
 
-      <div>
-        <h2><span class="dot"></span>当前连接状态</h2>
-        <div id="cfgAdapters" class="doclist"><div class="empty">加载中…</div></div>
-        <h2 style="margin-top:14px"><span class="dot"></span>怎么用（三步）</h2>
-        <div class="welcome" style="font-size:12.5px;line-height:1.8">
-          <b>第一步</b>：在①里选「先用演示数据」，直接点【保存并应用】，助手就能答通用问题。<br>
-          <b>第二步</b>：有真实系统时，选「连接真实系统」，填地址 →【测试连接并自动识别字段】→ 在下拉里选好字段 →【采用所选字段并保存】。<br>
-          <b>第三步</b>：想更自然，在②点【一键用 DeepSeek】，粘贴 key，保存。保存后到右侧对话窗发一句「你好」即可验证是否接通。
+      <div data-page-node-id="RNruR06NN4CNVoAnAtwZjV">
+        <h2 data-page-node-id="3JKsYCRIntiygCmMkynNUz"><span class="dot" data-page-node-id="YngzSDU9A7qP8vi7wgQtf6"></span>当前连接状态</h2>
+        <div id="cfgAdapters" class="doclist" data-page-node-id="YsAjXZl6DI4PhsGaMMBAfj"><div class="empty" data-page-node-id="FQOkYWSjNAHCyRLkLNeEUy">加载中…</div></div>
+        <h2 style="margin-top:14px" data-page-node-id="BRBpow3jNa6326zAlA0go6"><span class="dot" data-page-node-id="0nHfkMAn1OsiQ6ZHBSe0MK"></span>怎么用（三步）</h2>
+        <div class="welcome" style="font-size:12.5px;line-height:1.8" data-page-node-id="JmqQ7ZNXMQ1CtGClHaDLgC">
+          <b data-page-node-id="DQwwjQ2ew6QLSmyZgtYIkp">第一步</b>：在①里选「先用演示数据」，直接点【保存并应用】，助手就能答通用问题。<br data-page-node-id="jGg0PNwGVprVtpQLqOGtou">
+          <b data-page-node-id="rmiATIvSMB1oUIY3ccdrSa">第二步</b>：有真实系统时，选「连接真实系统」，填地址 →【测试连接并自动识别字段】→ 在下拉里选好字段 →【采用所选字段并保存】。<br data-page-node-id="Z9FxpvJS6AhqAbd2ddkv1W">
+          <b data-page-node-id="lMxdlT4XD9RRygY418xcMg">第三步</b>：想更自然，在②点【一键用 DeepSeek】，粘贴 key，保存。保存后到右侧对话窗发一句「你好」即可验证是否接通。
         </div>
       </div>
     </div>
   </section>
 </main>
-  <div class="resizer" id="chatResizer" title="拖动调整对话窗口宽度"></div>
+  <div class="resizer" id="chatResizer" title="拖动调整对话窗口宽度" data-page-node-id="H5GGCXftb78mHEyOpXv0uW"></div>
 
   <!-- ============ 对话窗口（右侧独立面板） ============ -->
-  <aside class="chatpanel">
-  <section id="tab-chat" class="card chatwrap">
-    <div class="chat-top">
-      <span class="title">💬 对话窗口</span>
-      <span class="spacer"></span>
-      <button class="ghost btn-sm" id="loadSampleChat">载入示例知识</button>
-      <button class="ghost btn-sm" id="newChat">新对话</button>
+  <aside class="chatpanel" data-page-node-id="EqCUmHQPXyCs68bhY0UdkD">
+  <section id="tab-chat" class="card chatwrap" data-page-node-id="L9UDW8U5sWN5dAqQyHaaRU">
+    <div class="chat-top" data-page-node-id="SZkoFMADWpFg0m0ujk50A8">
+      <span class="title" data-page-node-id="16suYEYA5glaXcQ56U0nus">💬 对话窗口</span>
+      <span class="spacer" data-page-node-id="arWubUZuyqX8pBLGlguUCG"></span>
+      <button class="ghost btn-sm" id="loadSampleChat" data-page-node-id="vwssVE125IxFMv7gtRIb6J">载入示例知识</button>
+      <button class="ghost btn-sm" id="newChat" data-page-node-id="FSznTn4VNsDs65Y5gc7L13">新对话</button>
     </div>
-    <div class="chat-ctx">
-      <label>订单号</label><input type="text" id="ctxOrder" placeholder="如 SO20260827" />
-      <label>SKU</label><input type="text" id="ctxSku" placeholder="如 SKU-A100" />
-      <span class="hint">上下文应用于本轮对话所有问题（留空按问题意图提示实时数据）</span>
+    <div class="chat-ctx" data-page-node-id="pnkXCBE0E6Gk813mDSORJa">
+      <label data-page-node-id="szS2RtrVtFsY9OY46itaG7">订单号</label><input type="text" id="ctxOrder" placeholder="如 SO20260827" data-page-node-id="ABf6eIumPMPlkZBoD8d9Hi" />
+      <label data-page-node-id="v4oxXwgJWdtDi5xdHgX6KI">SKU</label><input type="text" id="ctxSku" placeholder="如 SKU-A100" data-page-node-id="geNfzd6Dw2RuP7wGf3h5Bs" />
+      <span class="hint" data-page-node-id="vNptoZxFJZ80snlV7qCNCz">上下文应用于本轮对话所有问题（留空按问题意图提示实时数据）</span>
     </div>
-    <div class="chat-msgs" id="chatMsgs"></div>
-    <div class="chat-input">
+    <div class="chat-msgs" id="chatMsgs" data-page-node-id="Bu19muyzrJDufKP3m54l9W"></div>
+    <div class="chat-input" data-page-node-id="DlvJ6WufEAw1OfIIGbBpmq">
       <textarea id="chatIn" placeholder="输入消息，Enter 发送 / Shift+Enter 换行"></textarea>
-      <button id="chatSend">发送</button>
+      <button id="chatSend" data-page-node-id="UMFXLAQDWFDT5lQOhACKsf">发送</button>
     </div>
   </section>
   </aside>
 </div>
 
 <script>
+// 跨域配置——前后端分离部署到 GitHub Pages + 独立后端时，
+// 把 KB_API_BASE 改成真实后端 origin（如 "https://kb-mcp-api.onrender.com"）。
+// 同源部署（本地/一体机）保持空字符串，相对路径照常工作。
+window.KB_API_BASE = window.KB_API_BASE || ""; // 由部署脚本 / 构建时替换
+const API = (path) => (window.KB_API_BASE || "") + path;
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 async function refreshStatus(){
-  const s = await (await fetch('/api/status')).json();
+  const s = await (await fetch(API('/api/status')).json();
   $('status').innerHTML =
     `<span class="tag">存储：${s.backend}</span>` +
     `<span class="tag">嵌入：${s.embedding}</span>` +
@@ -496,7 +502,7 @@ async function refreshStatus(){
 }
 
 async function refreshDocs(){
-  const docs = await (await fetch('/api/docs')).json();
+  const docs = await (await fetch(API('/api/docs')).json();
   if(!docs.length){ $('docList').innerHTML = '<div class="empty">暂无文档，请先摄取。</div>'; return; }
   $('docList').innerHTML = docs.map(d => `
     <div class="docrow">
@@ -510,7 +516,7 @@ async function refreshDocs(){
 }
 window.delDoc = async (id) => {
   if(!confirm('确认删除文档 '+id+' ？')) return;
-  await fetch('/api/delete_doc',{method:'POST',headers:{'Content-Type':'application/json'},
+  await fetch(API('/api/delete_doc',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({doc_id:id})});
   refreshDocs(); refreshStatus();
 };
@@ -546,14 +552,14 @@ $('ingestBtn').onclick = async () => {
   const doc_id = $('docId').value.trim();
   const text = $('docText').value.trim();
   if(!text){ $('ingestHint').textContent='请先填写内容'; return; }
-  const j = await (await fetch('/api/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
+  const j = await (await fetch(API('/api/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({doc_id, text})})).json();
   $('ingestHint').textContent = `已入库 ${j.chunks} 个片段（${j.doc_id}）`;
   $('docId').value=''; $('docText').value='';
   refreshStatus(); refreshDocs();
 };
 $('sampleBtn').onclick = async () => {
-  const j = await (await fetch('/api/sample',{method:'POST'})).json();
+  const j = await (await fetch(API('/api/sample',{method:'POST'})).json();
   $('ingestHint').textContent = `已载入 ${j.ingested} 篇示例，共 ${j.count} 片段`;
   refreshStatus(); refreshDocs();
   hideBanner();
@@ -564,14 +570,14 @@ $('searchBtn').onclick = async () => {
   const query = $('q').value.trim(); if(!query) return;
   const top_k = parseInt($('topk').value||'3',10);
   const mode = $('mode').value;
-  const hits = await (await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},
+  const hits = await (await fetch(API('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({query, top_k, mode})})).json();
   $('searchResult').innerHTML = renderHits(hits, query);
   $('searchHint').textContent = `命中 ${hits.length} 条`;
 };
 
 async function refreshMetrics(){
-  const m = await (await fetch('/api/metrics')).json();
+  const m = await (await fetch(API('/api/metrics')).json();
   $('mTotal').textContent = m.requests_total;
   $('mAsk').textContent = m.asks_with_live;
   $('mErr').textContent = m.errors;
@@ -607,7 +613,7 @@ function showBanner(){
 }
 function hideBanner(){ const b=$('chatBanner'); if(b) b.remove(); }
 async function loadSampleChat(){
-  const j = await (await fetch('/api/sample',{method:'POST'})).json();
+  const j = await (await fetch(API('/api/sample',{method:'POST'})).json();
   refreshStatus(); refreshDocs(); hideBanner();
   addBot(`已载入 ${j.ingested} 篇示例 FAQ（退货/发票/物流/账号），现在可以开始对话了。`, {system:true});
 }
@@ -691,7 +697,7 @@ async function sendChat(){
                        .map(t=>({role:t.role, content:t.content}));
   let j;
   try{
-    j = await (await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    j = await (await fetch(API('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({question:q, top_k:3, order_id:ctx.order_id||null, sku:ctx.sku||null, history})})).json();
   }catch(e){ j = {answer:'请求失败：'+e, sources:[], live_cards:[], confidence:{label:'低'}, synthesis_method:'error', trace_id:'-'}; }
   typing(false);
@@ -721,7 +727,7 @@ document.querySelectorAll('.sidebar nav button').forEach(b=>{
 
 // ===== 知识图谱面板（P6 · GraphRAG 关系层）=====
 async function gapi(path, body){
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+  const r = await fetch(API(path), {method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body||{})});
   return r.json();
 }
@@ -969,7 +975,7 @@ $('graphNetLoad').onclick = ()=> loadGraphNetwork();
 
 // ===== Agent 协作面板（P7）=====
 async function aapi(path, body){
-  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+  const r = await fetch(API(path), {method:'POST', headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body||{})});
   return r.json();
 }
@@ -1040,7 +1046,7 @@ $('agAskBtn').onclick = agentAsk;
 // ===== P1-5 审计日志面板 =====
 async function loadAudit(){
   let j;
-  try{ j = await (await fetch('/api/audit')).json(); }
+  try{ j = await (await fetch(API('/api/audit')).json(); }
   catch(e){ $('auditList').innerHTML = '<div class="empty">加载失败：'+esc(String(e))+'</div>'; return; }
   const es = j.entries || [];
   if(!es.length){ $('auditList').innerHTML = '<div class="empty">暂无记录——先在任意页面提几个问题。</div>'; return; }
@@ -1091,7 +1097,7 @@ function toggleLive(){
   $('liveBlock').style.display = ($('KB_API_MOCK').value === "0") ? "block" : "none";
 }
 async function loadConfig(){
-  const j = await (await fetch('/api/config')).json();
+  const j = await (await fetch(API('/api/config')).json();
   for(const k of CFG_FIELDS){
     if(k==="KB_API_KEY" || k==="KB_LLM_API_KEY"){ continue; }
     if($(k)) $(k).value = j[k]!==undefined ? j[k] : "";
@@ -1114,7 +1120,7 @@ $('cfgSave').onclick = async ()=>{
   if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
     body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
   }
-  const j = await (await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+  const j = await (await fetch(API('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)})).json();
   $('cfgHint').textContent = j.ok ? '已保存并应用 ✓' : '保存失败';
   renderCfgAdapters(j.live_apis);
@@ -1131,7 +1137,7 @@ $('cfgTest').onclick = async ()=>{
     body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
   }
   let j;
-  try{ j = await (await fetch('/api/config/test',{method:'POST',headers:{'Content-Type':'application/json'},
+  try{ j = await (await fetch(API('/api/config/test',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)})).json(); }
   catch(e){ $('cfgHint').textContent='请求失败：'+e; return; }
   renderCfgAdapters(j._adapters || j.adapters);
@@ -1235,7 +1241,7 @@ async function uploadFiles(fileList){
       const b64 = bytesToB64(buf);
       const rel = f.webkitRelativePath || f.name;
       const doc_id = rel.replace(/\.[^.]+$/,'').replace(/[\\/]/g,'_');
-      const j = await (await fetch('/api/ingest_file',{method:'POST',headers:{'Content-Type':'application/json'},
+      const j = await (await fetch(API('/api/ingest_file',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({filename:f.name, content:b64, doc_id})})).json();
       rows.push(`<div class="docrow"><div class="meta"><div class="id">${esc(j.doc_id)}</div><div class="pv">${esc(f.name)} · ${j.chunks} 片段</div></div><span class="badge">OK</span></div>`); ok++;
     }catch(e){
@@ -1255,7 +1261,7 @@ $('importPathBtn').onclick = async ()=>{
   if(!folder){ $('batchHint').textContent='请先输入文件夹路径'; return; }
   $('batchHint').textContent='扫描中…';
   let j;
-  try{ j = await (await fetch('/api/ingest_folder',{method:'POST',headers:{'Content-Type':'application/json'},
+  try{ j = await (await fetch(API('/api/ingest_folder',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({folder, recursive:true})})).json(); }
   catch(e){ $('batchHint').textContent='请求失败：'+e; return; }
   const rows = (j.results||[]).map(r=>`<div class="docrow"><div class="meta"><div class="id">${esc(r.doc_id)}</div><div class="pv">${esc(r.file)} · ${r.chunks} 片段</div></div><span class="badge">OK</span></div>`).join('');

@@ -344,6 +344,49 @@ LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，�
 4. **接真实外部 API**：在 `.env` 配 `KB_ORDER_API_URL` / `KB_INVENTORY_API_URL` + 字段路径，并设 `KB_API_MOCK=0`。
 5. **加固**：设置 `KB_API_TOKEN` 启用 Bearer 鉴权，`KB_RATE_LIMIT` 限流，`KB_LOG_FILE` 落结构化日志。
 
+### 演示部署 · GitHub Pages + Render（前后端分离）
+
+> 适合做作品集/汇报演示页。零成本、可在浏览器里真实检索上传的语料。
+>
+> **架构**：静态前端托管在 `https://<user>.github.io/kb-mcp-server/`（GitHub Pages），后端 Flask
+> 跑在 Render 免费层 Web Service，跨域由 `KB_CORS_ORIGINS` 控制。
+
+**Step 1 · Render 部署后端**
+
+1. 注册 [render.com](https://render.com)，Dashboard → **New +** → **Web Service** → 选 `Doy369/kb-mcp-server`。
+2. 配置：
+   - **Runtime**: Python
+   - **Build Command**: 留空（自动用 `requirements.txt`）
+   - **Start Command**: `python app.py`
+   - **Instance Type**: Free
+   - **Health Check Path**: `/healthz`
+3. Environment（按需）：
+   - `KB_CORS_ORIGINS` = `https://Doy369.github.io`（多 origin 用英文逗号分隔）
+   - 其余默认即可（memory 后端 + dev 嵌入，免维护）
+4. 部署完记下 Render URL（如 `https://kb-mcp-server.onrender.com`）。
+
+**Step 2 · 绑定前端到后端**
+
+打开 `docs/index.html`，把脚本里的
+```js
+window.KB_API_BASE = ""; // ← Render URL 在这里
+```
+改成
+```js
+window.KB_API_BASE = "https://kb-mcp-server.onrender.com"; // ← Render URL 在这里
+```
+
+**Step 3 · 启用 GitHub Pages**
+
+仓库 → **Settings** → **Pages**：
+- **Source**: Deploy from a branch
+- **Branch**: `main` · **Folder**: `/docs`
+- Save
+
+几分钟后站点出现在 `https://Doy369.github.io/kb-mcp-server/`。
+
+> 注：Render 免费层冷启动 ~30s，首次访问会等久一点；之后保持热。
+
 ---
 
 ## 🖥 桌面客户端（可选）

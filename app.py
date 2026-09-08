@@ -189,11 +189,29 @@ def _metrics_inc(path: str, is_error: bool, extra: dict | None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _cors_headers(self) -> None:
+        """CORS：默认放行 KB_CORS_ORIGINS 列表；空 = 仅同源。"""
+        origin = self.headers.get("Origin", "")
+        allowed = settings.cors_origins  # list[str]
+        if allowed and origin in allowed:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Credentials", "true")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, X-Requested-With",
+            )
+            self.send_header(
+                "Access-Control-Allow-Methods", "GET, POST, OPTIONS"
+            )
+            self.send_header("Access-Control-Max-Age", "600")
+
     def _send_json(self, code: int, obj) -> None:
         data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
 
@@ -207,13 +225,25 @@ class Handler(BaseHTTPRequestHandler):
         # 禁止缓存，避免浏览器停留在旧版页面（无配置标签）
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def do_OPTIONS(self):  # noqa: N802 (stdlib handler naming)
+        # 浏览器跨域预检；CORS 头在 _send_json / 空 204 路径都给出
+        self.send_response(204)
+        self._cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _dispatch(self, method: str):
         p = urlparse(self.path)
         query = parse_qs(p.query)
         ip = self.client_address[0]
+        # 健康检查端点跳过鉴权/限流（部署平台探活）
+        if p.path in ("/healthz", "/health"):
+            self._send_json(200, {"ok": True, "uptime_s": round(time.time() - _START, 1)})
+            return
         ok, code, err = _guard(ip, self.headers, query)
         if not ok:
             self._send_json(code, err)
@@ -561,7 +591,7 @@ if __name__ == "__main__":
                 except Exception:
                     pass
 
-    port = int(os.getenv("KB_WEB_PORT", "8000"))
+    port = int(os.getenv("PORT") or os.getenv("KB_WEB_PORT") or "8000")
     # 端口占用自检：避免重复启动多个实例导致内存存储/摄取互相看不到
     import socket as _sock
     _probe = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
@@ -574,7 +604,7 @@ if __name__ == "__main__":
         _probe.close()
     auth = f" 鉴权=开(KB_API_TOKEN)" if settings.api_token else " 鉴权=关"
     rl = f" 限流={settings.rate_limit}/min" if settings.rate_limit else " 限流=关"
-    print(f"知识库演示控制台已启动: http://localhost:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl})")
+    print(f"知识库演示控制台已启动: 0.0.0.0:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl})")
     # 一键体验：自动打开默认浏览器
     try:
         webbrowser.open(f"http://localhost:{port}")
