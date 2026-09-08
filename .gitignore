@@ -29,6 +29,12 @@ venv/
 # P1-5 审计日志（只追加，内容含问答记录，不入库）
 kb_audit.jsonl
 
+# 规模化召回评测：嵌入缓存与中间产物（报告 bench_report_*.json 入库便于对比）
+bench_emb_*.npz
+*.tmp
+kb_graph_bench.json
+kb_store_bench.json
+
 # PyInstaller build artifacts (exe 二进制不进仓库)
 build/
 dist/

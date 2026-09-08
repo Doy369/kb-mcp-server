@@ -1,0 +1,19 @@
+{
+  "corpus": 992,
+  "sample": 300,
+  "embedding": "dev",
+  "unique_norm_q": 726,
+  "dup_chunks": 382,
+  "strict_recall_at": {
+    "1": 0.53,
+    "3": 0.7233,
+    "5": 0.8067
+  },
+  "semantic_recall_at": {
+    "1": 0.7167,
+    "3": 0.8633,
+    "5": 0.9333
+  },
+  "avg_top1_sim": 0.6581,
+  "elapsed_s": 0.9
+}
