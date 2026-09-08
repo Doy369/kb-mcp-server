@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: kb-mcp-server
+    runtime: python
+    plan: free
+    # Render 自动用 requirements.txt 安装依赖；Python 版本由 runtime.txt 控制
+    buildCommand: ""
+    startCommand: "python app.py"
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: KB_STORAGE_BACKEND
+        value: memory
+      - key: KB_EMBEDDING_BACKEND
+        value: dev
+      - key: KB_GRAPH_BACKEND
+        value: memory
+      - key: KB_LLM_ENABLED
+        value: "0"
+      - key: KB_API_MOCK
+        value: "1"
+      - key: KB_RATE_LIMIT
+        value: "120"
+      # 跨域：填你的 GitHub Pages 完整 origin，逗号分隔多个
+      - key: KB_CORS_ORIGINS
+        sync: false
+      # 如需启用 LLM 合成（云端 API），把下面 key 同步到 Render Secrets
+      # - key: KB_LLM_BASE_URL
+      #   sync: false
+      # - key: KB_LLM_API_KEY
+      #   sync: false
