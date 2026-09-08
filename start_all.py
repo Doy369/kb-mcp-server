@@ -17,8 +17,10 @@
 """
 import os
 import sys
+import re
 import time
 import signal
+import atexit
 import subprocess
 import argparse
 import webbrowser
@@ -90,9 +92,9 @@ def _wait_web(timeout=15):
 def start():
     print(f"[启动] 准备同时开启前后端 (Web 端口={WEB_PORT}) ...")
     if _is_port_listening(WEB_PORT):
-        print(f"[警告] 端口 {WEB_PORT} 已被占用，可能已有控制台实例在运行。")
-        print(f"        如需重启请先停止旧实例，或换端口: KB_WEB_PORT=9000 python start_all.py")
-        # 仍尝试启动 MCP；但 app.py 会因自检退出，下面会检测
+        print(f"[冲突] 端口 {WEB_PORT} 已被占用（多半是上次启动的旧实例），自动停止旧实例后重启...")
+        stop()
+        time.sleep(1)
     p_mcp = _start_mcp()
     print(f"[后端] MCP 工具服务已拉起 (pid={p_mcp.pid}, 日志={_log_path('mcp.log')})")
 
@@ -152,38 +154,49 @@ def _stop_procs():
 def stop():
     """停止本脚本拉起、或命令行中匹配的 app.py / kb_mcp_server 进程。"""
     print("[停止] 查找并终止 app.py / kb_mcp_server 进程 ...")
-    try:
-        out = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
-            capture_output=True, text=True, timeout=15,
-        ).stdout
-    except Exception as e:
-        print(f"[错误] 无法枚举进程: {e}")
-        return
-    # 用 wmic 按命令行匹配（tasklist 不带命令行）
-    try:
-        wmic = subprocess.run(
-            ["wmic", "process", "where", "name='python.exe'", "get", "processid,commandline"],
-            capture_output=True, text=True, timeout=20,
-        ).stdout
-    except Exception:
-        wmic = ""
     killed = []
-    for line in (wmic or out).splitlines():
-        if "app.py" in line or "kb_mcp_server" in line:
-            # 提取 pid
-            parts = [x.strip() for x in line.split()]
-            pid = None
-            for p in parts:
-                if p.isdigit():
-                    pid = p
-                    break
-            if pid:
-                try:
-                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=10)
-                    killed.append(pid)
-                except Exception:
-                    pass
+    # A) 精确杀掉占用 Web 端口的进程（避免误杀其它 python）
+    try:
+        net = subprocess.run(["netstat", "-ano"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=15).stdout or ""
+        for ln in net.splitlines():
+            if f":{WEB_PORT} " in ln and "LISTENING" in ln:
+                m = re.search(r"(\d+)\s*$", ln.strip())
+                if m:
+                    pid = m.group(1)
+                    try:
+                        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=10)
+                        killed.append(pid)
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"[警告] netstat 查端口失败: {e}")
+    # B) 再杀命令行含 app.py / kb_mcp_server 的 python 进程（含 MCP 后端）
+    try:
+        ps = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+             "Select-Object ProcessId,CommandLine | "
+             "ForEach-Object { $_.ProcessId.ToString() + '||' + ($_.CommandLine -replace '\"','') }"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=25,
+        ).stdout or ""
+        for line in ps.splitlines():
+            if "app.py" in line or "kb_mcp_server" in line:
+                pid = line.split("||", 1)[0].strip()
+                if pid.isdigit() and pid not in killed:
+                    try:
+                        subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=10)
+                        killed.append(pid)
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"[警告] PowerShell 枚举失败 ({e})，回退 tasklist ...")
+        try:
+            tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15).stdout or ""
+            # tasklist CSV 不带命令行，无法精确匹配，仅记录
+        except Exception as e2:
+            print(f"[错误] 无法枚举进程: {e2}")
     if killed:
         print(f"[停止] 已终止进程: {', '.join(killed)}")
     else:
@@ -194,6 +207,7 @@ def main():
     parser = argparse.ArgumentParser(description="一键开启知识库前后端 (Web + MCP)")
     parser.add_argument("--stop", action="store_true", help="停止已拉起的进程")
     args = parser.parse_args()
+    atexit.register(_stop_procs)
     if args.stop:
         stop()
     else:
