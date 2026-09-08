@@ -531,7 +531,7 @@ function showStaticBanner(){
 }
 
 async function refreshDocs(){
-  const docs = await (await fetch(API('/api/docs')).json();
+  const docs = await (await fetch(API('/api/docs'))).json();
   if(!docs.length){ $('docList').innerHTML = '<div class="empty">暂无文档，请先摄取。</div>'; return; }
   $('docList').innerHTML = docs.map(d => `
     <div class="docrow">
@@ -546,7 +546,7 @@ async function refreshDocs(){
 window.delDoc = async (id) => {
   if(!confirm('确认删除文档 '+id+' ？')) return;
   await fetch(API('/api/delete_doc',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({doc_id:id})});
+    body:JSON.stringify({doc_id:id})}));
   refreshDocs(); refreshStatus();
 };
 
@@ -582,13 +582,13 @@ $('ingestBtn').onclick = async () => {
   const text = $('docText').value.trim();
   if(!text){ $('ingestHint').textContent='请先填写内容'; return; }
   const j = await (await fetch(API('/api/ingest',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({doc_id, text})})).json();
+    body:JSON.stringify({doc_id, text})}))).json();
   $('ingestHint').textContent = `已入库 ${j.chunks} 个片段（${j.doc_id}）`;
   $('docId').value=''; $('docText').value='';
   refreshStatus(); refreshDocs();
 };
 $('sampleBtn').onclick = async () => {
-  const j = await (await fetch(API('/api/sample',{method:'POST'})).json();
+  const j = await (await fetch(API('/api/sample',{method:'POST'}))).json();
   $('ingestHint').textContent = `已载入 ${j.ingested} 篇示例，共 ${j.count} 片段`;
   refreshStatus(); refreshDocs();
   hideBanner();
@@ -600,13 +600,13 @@ $('searchBtn').onclick = async () => {
   const top_k = parseInt($('topk').value||'3',10);
   const mode = $('mode').value;
   const hits = await (await fetch(API('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({query, top_k, mode})})).json();
+    body:JSON.stringify({query, top_k, mode})}))).json();
   $('searchResult').innerHTML = renderHits(hits, query);
   $('searchHint').textContent = `命中 ${hits.length} 条`;
 };
 
 async function refreshMetrics(){
-  const m = await (await fetch(API('/api/metrics')).json();
+  const m = await (await fetch(API('/api/metrics'))).json();
   $('mTotal').textContent = m.requests_total;
   $('mAsk').textContent = m.asks_with_live;
   $('mErr').textContent = m.errors;
@@ -642,7 +642,7 @@ function showBanner(){
 }
 function hideBanner(){ const b=$('chatBanner'); if(b) b.remove(); }
 async function loadSampleChat(){
-  const j = await (await fetch(API('/api/sample',{method:'POST'})).json();
+  const j = await (await fetch(API('/api/sample',{method:'POST'}))).json();
   refreshStatus(); refreshDocs(); hideBanner();
   addBot(`已载入 ${j.ingested} 篇示例 FAQ（退货/发票/物流/账号），现在可以开始对话了。`, {system:true});
 }
@@ -727,7 +727,7 @@ async function sendChat(){
   let j;
   try{
     j = await (await fetch(API('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({question:q, top_k:3, order_id:ctx.order_id||null, sku:ctx.sku||null, history})})).json();
+      body:JSON.stringify({question:q, top_k:3, order_id:ctx.order_id||null, sku:ctx.sku||null, history})}))).json();
   }catch(e){ j = {answer:'请求失败：'+e, sources:[], live_cards:[], confidence:{label:'低'}, synthesis_method:'error', trace_id:'-'}; }
   typing(false);
   j._ms = Math.round(performance.now()-t0);
@@ -1075,7 +1075,7 @@ $('agAskBtn').onclick = agentAsk;
 // ===== P1-5 审计日志面板 =====
 async function loadAudit(){
   let j;
-  try{ j = await (await fetch(API('/api/audit')).json(); }
+  try{ j = await (await fetch(API('/api/audit'))).json(); }
   catch(e){ $('auditList').innerHTML = '<div class="empty">加载失败：'+esc(String(e))+'</div>'; return; }
   const es = j.entries || [];
   if(!es.length){ $('auditList').innerHTML = '<div class="empty">暂无记录——先在任意页面提几个问题。</div>'; return; }
@@ -1126,7 +1126,7 @@ function toggleLive(){
   $('liveBlock').style.display = ($('KB_API_MOCK').value === "0") ? "block" : "none";
 }
 async function loadConfig(){
-  const j = await (await fetch(API('/api/config')).json();
+  const j = await (await fetch(API('/api/config'))).json();
   for(const k of CFG_FIELDS){
     if(k==="KB_API_KEY" || k==="KB_LLM_API_KEY"){ continue; }
     if($(k)) $(k).value = j[k]!==undefined ? j[k] : "";
@@ -1150,7 +1150,7 @@ $('cfgSave').onclick = async ()=>{
     body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
   }
   const j = await (await fetch(API('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)})).json();
+    body:JSON.stringify(body)}))).json();
   $('cfgHint').textContent = j.ok ? '已保存并应用 ✓' : '保存失败';
   renderCfgAdapters(j.live_apis);
   refreshStatus();
@@ -1167,7 +1167,7 @@ $('cfgTest').onclick = async ()=>{
   }
   let j;
   try{ j = await (await fetch(API('/api/config/test',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)})).json(); }
+    body:JSON.stringify(body)}))).json(); }
   catch(e){ $('cfgHint').textContent='请求失败：'+e; return; }
   renderCfgAdapters(j._adapters || j.adapters);
   const rows = (j.adapters||[]).map(a=>{
@@ -1271,7 +1271,7 @@ async function uploadFiles(fileList){
       const rel = f.webkitRelativePath || f.name;
       const doc_id = rel.replace(/\.[^.]+$/,'').replace(/[\\/]/g,'_');
       const j = await (await fetch(API('/api/ingest_file',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({filename:f.name, content:b64, doc_id})})).json();
+        body:JSON.stringify({filename:f.name, content:b64, doc_id})}))).json();
       rows.push(`<div class="docrow"><div class="meta"><div class="id">${esc(j.doc_id)}</div><div class="pv">${esc(f.name)} · ${j.chunks} 片段</div></div><span class="badge">OK</span></div>`); ok++;
     }catch(e){
       rows.push(`<div class="docrow"><div class="meta"><div class="id" style="color:var(--red)">${esc(f.name)}</div><div class="pv">失败</div></div><span class="badge" style="background:var(--red-soft);color:var(--red)">ERR</span></div>`); fail++;
@@ -1291,7 +1291,7 @@ $('importPathBtn').onclick = async ()=>{
   $('batchHint').textContent='扫描中…';
   let j;
   try{ j = await (await fetch(API('/api/ingest_folder',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({folder, recursive:true})})).json(); }
+    body:JSON.stringify({folder, recursive:true})}))).json(); }
   catch(e){ $('batchHint').textContent='请求失败：'+e; return; }
   const rows = (j.results||[]).map(r=>`<div class="docrow"><div class="meta"><div class="id">${esc(r.doc_id)}</div><div class="pv">${esc(r.file)} · ${r.chunks} 片段</div></div><span class="badge">OK</span></div>`).join('');
   const skips = (j.skipped||[]).map(s=>`<div class="docrow"><div class="meta"><div class="id" style="color:var(--red)">${esc(s.file)}</div><div class="pv">${esc(s.error)}</div></div><span class="badge" style="background:var(--red-soft);color:var(--red)">ERR</span></div>`).join('');
