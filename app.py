@@ -580,16 +580,37 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    # exe 首跑播种：把打包内的默认数据(kb_store.json / runtime_config.json)复制到用户数据目录
+    # exe 首跑播种：把打包内的默认数据复制到用户数据目录
     if getattr(sys, "frozen", False) and DATA_DIR:
-        for _f in ("kb_store.json", "runtime_config.json"):
-            _src = os.path.join(sys._MEIPASS, _f)
-            _dst = os.path.join(DATA_DIR, _f)
-            if os.path.exists(_src) and not os.path.exists(_dst):
+        import json as _json
+
+        def _seed_count(p):
+            try:
+                d = _json.load(open(p, encoding="utf-8"))
+                return len(d.get("chunks") or d.get("docs") or [])
+            except Exception:
+                return -1
+
+        # 文档：仅当内置种子比已有更新(文档数更多)才覆盖——
+        # 既保证「更新 exe = 更新到最新文档」, 又不误删用户在 exe 内自行新增的文档
+        _src = os.path.join(sys._MEIPASS, "kb_store.json")
+        _dst = os.path.join(DATA_DIR, "kb_store.json")
+        if os.path.exists(_src):
+            _src_n = _seed_count(_src)
+            _dst_n = _seed_count(_dst) if os.path.exists(_dst) else -1
+            if _src_n > 0 and (_dst_n < 0 or _dst_n < _src_n):
                 try:
                     shutil.copyfile(_src, _dst)
                 except Exception:
                     pass
+        # 运行配置：仅首次复制, 保护用户调参(MIN_SCORE 等)
+        _src2 = os.path.join(sys._MEIPASS, "runtime_config.json")
+        _dst2 = os.path.join(DATA_DIR, "runtime_config.json")
+        if os.path.exists(_src2) and not os.path.exists(_dst2):
+            try:
+                shutil.copyfile(_src2, _dst2)
+            except Exception:
+                pass
 
     port = int(os.getenv("PORT") or os.getenv("KB_WEB_PORT") or "8000")
     # 端口占用自检：避免重复启动多个实例导致内存存储/摄取互相看不到
