@@ -478,17 +478,30 @@
 </div>
 
 <script>
-// 跨域配置——前后端分离部署到 GitHub Pages + 独立后端时，
-// 把 KB_API_BASE 改成真实后端 origin（如 "https://kb-mcp-api.onrender.com"）。
-// 同源部署（本地/一体机）保持空字符串，相对路径照常工作。
-window.KB_API_BASE = window.KB_API_BASE || ""; // 由部署脚本 / 构建时替换
+// 跨域配置——
+// 1) 仅前端部署（GitHub Pages 静态托管，无后端）：保持下面 "" 即可。
+//    页面会显示"📦 静态演示"标识，按钮可点但后端调用会 404。
+// 2) 前后端分离部署（前端 Pages + 后端 Render 等）：把 KB_API_BASE 改成后端 origin。
+//    形如 "https://kb-mcp-server.onrender.com"，末尾不带斜杠。
+window.KB_API_BASE = ""; // ← 仅前端部署保持空；接后端时填 Render URL
 const API = (path) => (window.KB_API_BASE || "") + path;
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 async function refreshStatus(){
-  const s = await (await fetch(API('/api/status')).json();
+  let s;
+  try {
+    s = await (await fetch(API('/api/status'), {cache:'no-store'})).json();
+  } catch (e) {
+    // 后端不可达——静态部署模式（前端托管在 GitHub Pages 等独立域名，未配 KB_API_BASE）
+    window.__staticMode = true;
+    $('status').innerHTML =
+      `<span class="tag amber">📦 静态演示</span>` +
+      `<span class="tag gray">未连接后端</span>`;
+    showStaticBanner();
+    return;
+  }
   $('status').innerHTML =
     `<span class="tag">存储：${s.backend}</span>` +
     `<span class="tag">嵌入：${s.embedding}</span>` +
@@ -499,6 +512,22 @@ async function refreshStatus(){
   if(s.count === 0 && !window.__sampleOffered){
     showBanner();
   }
+}
+
+function showStaticBanner(){
+  // 只显示一次；解释当前是纯前端部署，按钮点击会因 API 404 而失败
+  if($('staticBanner')) return;
+  const b = document.createElement('div');
+  b.className = 'banner';
+  b.id = 'staticBanner';
+  b.style.cssText = 'background:#eaf1ff;border-color:#c7d8ff;color:#2f6bff;';
+  b.innerHTML =
+    '📦 <b>静态演示模式</b>：仅前端托管在 GitHub Pages，后端 API 未连接。' +
+    '搜索/对话/摄取等操作将返回 404。' +
+    '如需完整功能，请部署 Render 后端并把 <code>window.KB_API_BASE</code> 改成其 URL。';
+  const chat = $('chatMsgs');
+  if (chat) chat.prepend(b);
+  else document.querySelector('main.content')?.prepend(b);
 }
 
 async function refreshDocs(){
