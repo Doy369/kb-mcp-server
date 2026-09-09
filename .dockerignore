@@ -1,0 +1,59 @@
+# ---- 版本控制 / 环境 ----
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+*.egg-info
+
+# ---- 密钥（绝不进镜像）----
+.env
+runtime_config.json
+
+# ---- 本地持久化数据（容器内用 volume，不打进镜像）----
+kb_store.json
+kb_graph.json
+kb_audit.jsonl
+kb_store_demo.json
+kb_graph_demo.json
+data/
+logs/
+*.log
+
+# ---- 评测 / bench 大文件与中间产物 ----
+bench_emb_*.npz
+kb_store_bench.json
+kb_graph_bench.json
+kb_store_eval.json
+kb_graph_eval.json
+bench_report_*.json
+eval_report.json
+golden.jsonl
+
+# ---- 构建产物 ----
+build/
+dist/
+*.spec
+*.exe
+
+# ---- 文档与语料（docs 给 Pages、samples/test-docs 用 bind mount，都不进镜像）----
+docs/
+samples/
+test-docs/
+*.docx
+*.md
+
+# ---- 本地开发脚本（容器只用 app.py）----
+start_all.py
+start_all.bat
+client.py
+demo_*.py
+eval_run.py
+bench_scale.py
+check_adapters.py
+fake_order_api.py
+make_*.py
+rebuild_index.py
+setup_db.py
+run_demo.py

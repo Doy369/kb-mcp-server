@@ -12,8 +12,15 @@ def _is_frozen() -> bool:
 
 
 def get_data_dir() -> str:
-    """exe 冻结模式下返回用户可写数据目录（%APPDATA%/kb-mcp-server）；
-    开发模式返回空串（沿用项目根）。"""
+    """数据目录优先级：
+    1. KB_DATA_DIR 环境变量（Docker/容器部署时挂 volume 用，所有持久化文件统一落到这里）
+    2. exe 冻结模式 -> %APPDATA%/kb-mcp-server（用户可写目录，避免写只读临时解压目录）
+    3. 开发模式 -> 空串（沿用项目根）
+    """
+    env = os.environ.get("KB_DATA_DIR", "").strip()
+    if env:
+        os.makedirs(env, exist_ok=True)
+        return env
     if _is_frozen():
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
         d = os.path.join(base, "kb-mcp-server")

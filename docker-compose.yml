@@ -1,0 +1,69 @@
+services:
+  kb-mcp-server:
+    build:
+      context: .
+      args:
+        ENABLE_BGE: "false"        # 改 true 启用本地 bge 语义嵌入（镜像 2GB+）
+        ENABLE_PGVECTOR: "false"   # 改 true 并打开下方 postgres 服务、把 KB_STORAGE_BACKEND 改成 pgvector
+    image: kb-mcp-server:latest
+    container_name: kb-mcp-server
+    ports:
+      - "8000:8000"
+    environment:
+      # ---- 默认轻量离线：memory 存储 + dev 嵌入，无需任何外部服务 ----
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_API_MOCK: "1"
+      KB_LLM_ENABLED: "0"
+      KB_DATA_DIR: /app/data
+      PORT: "8000"
+
+      # ---- 按需打开（取消注释即可）----
+      # 跨域：前端部署到 GitHub Pages 时填完整 origin（逗号分隔多个）
+      # KB_CORS_ORIGINS: "https://Doy369.github.io"
+      # LLM 合成（云端 API，如 DeepSeek）
+      # KB_LLM_ENABLED: "1"
+      # KB_LLM_BASE_URL: "https://api.deepseek.com/v1"
+      # KB_LLM_MODEL: "deepseek-chat"
+      # KB_LLM_API_KEY: "sk-xxx"
+      # 入口鉴权 + 限流（生产建议开启）
+      # KB_API_TOKEN: "your-bearer-token"
+      # KB_RATE_LIMIT: "120"
+
+    volumes:
+      # 知识库 + 图 + 审计日志 + runtime_config 全落这里，容器重启不丢
+      - kb-data:/app/data
+      # 可选：把本地 samples/ 只读挂进来做初始语料
+      - ./samples:/app/samples:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ---- 可选：生产用 Postgres + pgvector ----
+  # 启用步骤：
+  #   1. 打开上方 kb-mcp-server.build.args.ENABLE_PGVECTOR = "true"
+  #   2. kb-mcp-server.environment.KB_STORAGE_BACKEND = "pgvector"
+  #   3. kb-mcp-server.environment.KB_DATABASE_URL = "postgresql://kb:kb@postgres:5432/kb"
+  #   4. 取消下方 postgres 服务的注释
+  # postgres:
+  #   image: pgvector/pgvector:pg16
+  #   environment:
+  #     POSTGRES_USER: kb
+  #     POSTGRES_PASSWORD: kb
+  #     POSTGRES_DB: kb
+  #   volumes:
+  #     - pg-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U kb"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+volumes:
+  kb-data:
+  # pg-data:
