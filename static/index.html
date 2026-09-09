@@ -511,9 +511,6 @@ $('llmTest').onclick = async ()=>{
   const btn=$('llmTest'), out=$('llmTestResult');
   btn.disabled=true; out.style.color=''; out.textContent='正在保存配置…';
   const body = cfgCollect(true);
-  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
-    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
-  }
   try{
     const rs = await fetch(API('/api/config'), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const js = await rs.json();
@@ -1162,9 +1159,11 @@ const CFG_FIELDS = [
 let _cfgKeySet = false, _llmKeySet = false;
 
 function cfgCollect(skipEmptyKey){
+  // 不再特殊跳过 masked key：让 input 当前值（空或非空）都进 body，
+  // 后端 /api/config 的 if not v: continue 会兜底「空=不覆盖」语义。
+  // 旧逻辑在 !_llmKeySet=false 时会静默吞掉新 key，已移除。
   const body = {};
   for(const k of CFG_FIELDS){
-    if((k==="KB_API_KEY" || k==="KB_LLM_API_KEY") && skipEmptyKey) continue;
     body[k] = $(k).value.trim();
   }
   body.KB_LLM_ENABLED = ($('KB_LLM_PROVIDER').value === "none") ? "0" : "1";
@@ -1201,12 +1200,6 @@ async function loadConfig(){
 $('cfgSave').onclick = async ()=>{
   $('cfgHint').textContent = '保存中…';
   const body = cfgCollect(true);
-  if(!_cfgKeySet && $('KB_API_KEY').value.trim()!==""){
-    body.KB_API_KEY = $('KB_API_KEY').value.trim();
-  }
-  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
-    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
-  }
   let r, j;
   try{
     r = await fetch(API('/api/config'), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -1230,12 +1223,6 @@ $('cfgSave').onclick = async ()=>{
 $('cfgTest').onclick = async ()=>{
   $('cfgHint').textContent = '连接测试中…';
   const body = cfgCollect(true);
-  if(!_cfgKeySet && $('KB_API_KEY').value.trim()!==""){
-    body.KB_API_KEY = $('KB_API_KEY').value.trim();
-  }
-  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
-    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
-  }
   let j;
   try{ j = await (await fetch(API('/api/config/test'),{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify(body)})).json(); }
