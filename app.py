@@ -94,6 +94,36 @@ API_CONFIG_KEYS = [
 _KEY_MASK = "***已设置***"
 _MASKED_KEYS = ("KB_API_KEY", "KB_LLM_API_KEY")
 
+# 数值型配置项：写入前必须校验。
+# 原因：配置值以字符串持久化，早期写入无校验，一旦落入 "abc" 这类非法值，
+# reload_adapters() 里 int() 会抛 ValueError → /api/config 恒 500 → 页面永远「保存失败」，
+# 且错误值已落盘，后续怎么改都救不回来（只能手改 runtime_config.json）。
+_INT_CFG_KEYS = ("KB_API_TIMEOUT", "KB_API_TTL")
+_FLOAT_CFG_KEYS = ("KB_GUARDRAIL_MIN_CONFIDENCE",)
+
+
+def _validate_cfg_value(k: str, v) -> str | None:
+    """校验单个配置值。返回 None=通过；否则返回错误说明（用于 400 提示）。
+
+    空串表示"清空该项、回落默认"，是合法操作，不做数值校验。
+    """
+    s = "" if v is None else str(v).strip()
+    if s == "":
+        return None
+    if k in _INT_CFG_KEYS:
+        try:
+            n = int(s)
+        except ValueError:
+            return f"{k} 需要整数，当前值 {s!r} 不合法"
+        if n < 0:
+            return f"{k} 不能为负数（当前 {n}）"
+    elif k in _FLOAT_CFG_KEYS:
+        try:
+            float(s)
+        except ValueError:
+            return f"{k} 需要数字，当前值 {s!r} 不合法"
+    return None
+
 SAMPLE = {
     "faq_returns": (
         "如何申请退货？在订单签收后 7 天内，于「我的订单」点击申请退货，"
@@ -545,6 +575,13 @@ class Handler(BaseHTTPRequestHandler):
             return 200, out, None
 
         if path in ("/api/config", "/api/config/test"):
+            # 先整批校验再写入：任一项非法就整批拒绝，避免"写进去一半再崩"把配置毒化
+            for k in API_CONFIG_KEYS:
+                if k not in payload:
+                    continue
+                err = _validate_cfg_value(k, payload[k])
+                if err:
+                    return 400, {"ok": False, "error": err}, None
             # 应用页面提交（含可选测试）：密钥留空则不覆盖；测试前先应用再探测
             applied = {}
             for k in API_CONFIG_KEYS:

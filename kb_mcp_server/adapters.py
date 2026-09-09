@@ -275,6 +275,22 @@ def all_adapters() -> list[APIAdapter]:
     return list(_REGISTRY.values())
 
 
+def _safe_int(raw, default: int, minimum: int | None = None) -> int:
+    """把配置值安全解析为 int。
+
+    运行时配置可被页面写成任意字符串（早期版本写入无校验），直接 int() 会抛
+    ValueError 让整个 /api/config 乃至服务 500。这里非法值一律回落到 default，
+    保证「配置坏了也能起来」，真正的拦截交给写入侧校验。
+    """
+    try:
+        v = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and v < minimum:
+        return default
+    return v
+
+
 def build_registry() -> dict[str, APIAdapter]:
     """按运行时配置（页面写入，优先于环境变量）构建适配器注册表。"""
     mock = str(get_cfg("KB_API_MOCK", "1")).lower() in ("1", "true", "yes")
@@ -282,8 +298,9 @@ def build_registry() -> dict[str, APIAdapter]:
     scheme = get_cfg("KB_API_AUTH_SCHEME", "bearer").lower()
     auth_header = get_cfg("KB_API_AUTH_HEADER", "Authorization")
     auth_query = get_cfg("KB_API_AUTH_QUERY", "")
-    timeout = int(get_cfg("KB_API_TIMEOUT", "5") or "5")
-    ttl = int(get_cfg("KB_API_TTL", "30") or "30")
+    # 数值项容错解析：配置被写成非法值(如 "abc")时回落到默认，绝不让整个服务崩掉
+    timeout = _safe_int(get_cfg("KB_API_TIMEOUT", "5"), 5, minimum=1)
+    ttl = _safe_int(get_cfg("KB_API_TTL", "30"), 30, minimum=0)
 
     order = OrderStatusAdapter(
         base_url=get_cfg("KB_ORDER_API_URL", ""), api_key=api_key,

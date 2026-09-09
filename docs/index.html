@@ -1149,9 +1149,14 @@ $('cfgSave').onclick = async ()=>{
   if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
     body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
   }
-  const j = await (await fetch(API('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)}))).json();
-  $('cfgHint').textContent = j.ok ? '已保存并应用 ✓' : '保存失败';
+  let j;
+  try{
+    j = await (await fetch(API('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)}))).json();
+  }catch(e){ $('cfgHint').textContent = '请求失败：'+e; return; }
+  // 后端现在会给出具体原因（如 "KB_API_TIMEOUT 需要整数"），直接呈现而不是笼统的"保存失败"
+  $('cfgHint').textContent = j.ok ? '已保存并应用 ✓' : ('保存失败：' + (j.error || '未知错误'));
+  if(!j.ok) return;
   renderCfgAdapters(j.live_apis);
   refreshStatus();
   setTimeout(()=>{ $('cfgHint').textContent=''; }, 2500);
