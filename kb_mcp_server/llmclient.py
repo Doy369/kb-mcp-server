@@ -84,3 +84,71 @@ def llm_chat(prompt: str, temperature: float = 0.2, max_tokens: int = 400,
 
 def llm_enabled() -> bool:
     return get_cfg("KB_LLM_ENABLED", "0").lower() in ("1", "true", "yes")
+
+
+def llm_selfcheck(timeout: int = 20) -> dict:
+    """实发一次最小请求做体检，返回可诊断结果（不受 60s 熔断影响，便于改完 key 立刻复验）。
+
+    成功时顺带清掉熔断，让合成链路立即恢复；失败原因写入 _LAST_ERROR 供 /api/status 展示。
+    """
+    global _BREAK_UNTIL, _LAST_ERROR, _LAST_OK_AT
+
+    base = get_cfg("KB_LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
+    model = get_cfg("KB_LLM_MODEL", "qwen2.5:7b")
+    key = get_cfg("KB_LLM_API_KEY", "")
+    local = ("://localhost" in base) or ("://127.0.0.1" in base)
+
+    out = {
+        "enabled": llm_enabled(),
+        "base_url": base,
+        "model": model,
+        "api_key_set": bool(key),
+        # 只回显首尾几个字符：够判断「填错成占位值」，又不至于泄露整串
+        "api_key_hint": (key[:7] + "..." + key[-4:]) if len(key) > 16
+                        else ("(疑似占位值，长度异常)" if key else "(未设置)"),
+        "ok": False, "http_status": None, "error": "", "reply": "", "latency_ms": 0,
+    }
+    if not out["enabled"]:
+        out["error"] = "KB_LLM_ENABLED=0，未启用合成（答案走模板）"
+        return out
+    if not key and not local:
+        out["error"] = "云端接口但未填 KB_LLM_API_KEY，必然 401"
+        return out
+
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "只回复两个字：你好"}],
+        "max_tokens": 16,
+    }).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(base + "/chat/completions", data=body, headers=headers)
+
+    t0 = time.time()
+    try:
+        opener = (urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                  if local else urllib.request.build_opener())
+        with opener.open(req, timeout=timeout) as resp:
+            out["http_status"] = resp.status
+            data = json.loads(resp.read().decode("utf-8"))
+        txt = (data["choices"][0]["message"]["content"] or "").strip()
+        out["ok"] = bool(txt)
+        out["reply"] = txt[:120]
+        if txt:
+            _LAST_OK_AT, _LAST_ERROR, _BREAK_UNTIL = time.time(), "", 0.0
+    except Exception as e:  # noqa: BLE001 - 体检要的就是失败详情
+        code = getattr(e, "code", None)
+        if code is not None:
+            try:
+                raw = (e.read() or b"").decode("utf-8", "ignore")[:300]
+            except Exception:  # noqa: BLE001
+                raw = ""
+            out["http_status"] = code
+            out["error"] = f"HTTP {code}: {raw}" if raw else f"HTTP {code}"
+        else:
+            out["error"] = f"{type(e).__name__}: {e}"[:300]
+        _BREAK_UNTIL = time.time() + _BREAK_SECONDS
+        _LAST_ERROR = out["error"]
+    out["latency_ms"] = int((time.time() - t0) * 1000)
+    return out

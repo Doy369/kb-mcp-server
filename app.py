@@ -28,7 +28,7 @@ from urllib.parse import urlparse, parse_qs
 from kb_mcp_server.adapters import adapter_status, fetch_live, reload_adapters, self_check
 from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, get_cfg, DATA_DIR
 from kb_mcp_server.embeddings import get_embedder
-from kb_mcp_server.llmclient import llm_last_error, llm_last_ok_at
+from kb_mcp_server.llmclient import llm_last_error, llm_last_ok_at, llm_selfcheck
 from kb_mcp_server.extensions import install_default_guardrail
 from kb_mcp_server.graph import expand_facts, get_graph_store
 from kb_mcp_server.ingestion import IngestionPipeline
@@ -327,6 +327,9 @@ class Handler(BaseHTTPRequestHandler):
                 "rate_limit": settings.rate_limit,
                 "live_apis": adapter_status(),
             }, None
+        if path == "/api/llm/selfcheck":
+            # 实发一次请求体检：改完 KB_LLM_API_KEY 点一下即可确认是否生效
+            return 200, llm_selfcheck(), None
         if path == "/api/docs":
             return 200, _store.list_docs(), None
         if path == "/api/metrics":

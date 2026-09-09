@@ -425,6 +425,11 @@
         <input type="text" id="KB_LLM_BASE_URL" placeholder="如 https://api.deepseek.com/v1" data-page-node-id="BdGN95A7XcINBW8Mc61ySC" />
         <label data-page-node-id="sXcasaodfPcUT6LZIutxd1">API Key（模型平台给的密钥）</label>
         <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" data-page-node-id="cJtRlwI0lr0xfnpQNRsdME" />
+        <input type="text" id="KB_LLM_API_KEY" placeholder="留空保持不变" autocomplete="off" data-page-node-id="cJtRlwI0lr0xfnpQNRsdME" />
+        <div style="margin:8px 0 2px">
+          <button class="ghost btn-sm" id="llmTest" data-page-node-id="llmTestBtn">测试 LLM 连接</button>
+          <span id="llmTestResult" class="hint" style="margin-left:8px" data-page-node-id="llmTestResult"></span>
+        </div>
 
         <!-- ③ 答案护栏（P1-5） -->
         <h2 style="margin-top:18px" data-page-node-id="a4lSIS11ntUSNSzNaAKVO7"><span class="dot" data-page-node-id="OE0j3sP8a5dQY8Nygmcw92"></span>③ 答案护栏（防止答非所问）</h2>
@@ -499,6 +504,48 @@ function llmTag(s){
   return `<span class="tag amber" style="cursor:help" title="${esc(err)}"
     onclick="alert('LLM 调用失败，答案已回退为模板：\n\n' + '${shown}')">⚠ LLM 不可用·答案回退模板</span>`;
 }
+
+$('llmTest').onclick = async ()=>{
+  // 改完 KB_LLM_API_KEY 立刻验一次，避免「填了但还是模板答案」靠猜。
+  // 自检读的是已落盘的 runtime_config，所以必须先保存再测，否则验的还是旧 key。
+  const btn=$('llmTest'), out=$('llmTestResult');
+  btn.disabled=true; out.style.color=''; out.textContent='正在保存配置…';
+  const body = cfgCollect(true);
+  if(!_llmKeySet && $('KB_LLM_API_KEY').value.trim()!==""){
+    body.KB_LLM_API_KEY = $('KB_LLM_API_KEY').value.trim();
+  }
+  try{
+    const rs = await fetch(API('/api/config'), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    const js = await rs.json();
+    if(!js || !js.ok){
+      out.style.color='var(--color-text-danger)';
+      out.textContent='保存失败（未测试）：'+(js&&js.error?js.error:('HTTP '+rs.status));
+      btn.disabled=false; return;
+    }
+  }catch(e){
+    out.style.color='var(--color-text-danger)';
+    out.textContent='保存请求异常：'+(e&&e.message?e.message:e);
+    btn.disabled=false; return;
+  }
+  out.textContent='已保存，测试中…（最多 20 秒）';
+  try{
+    const r = await fetch(API('/api/llm/selfcheck'), {cache:'no-store'});
+    const j = await r.json();
+    if(j.ok){
+      out.style.color='var(--color-text-success)';
+      out.textContent = '已连通：' + j.model + ' 回复「' + String(j.reply||'').slice(0,40) + '」（' + j.latency_ms + 'ms，key ' + (j.api_key_hint||'') + '）';
+    }else{
+      out.style.color='var(--color-text-danger)';
+      out.textContent = '失败：' + String(j.error||'未知原因').slice(0,220);
+    }
+  }catch(e){
+    out.style.color='var(--color-text-danger)';
+    out.textContent='请求异常：'+(e && e.message ? e.message : e);
+  }
+  btn.disabled=false;
+  refreshStatus();
+};
+
 
 async function refreshStatus(){
   let s;
