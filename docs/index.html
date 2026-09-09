@@ -405,6 +405,17 @@
           <div id="cfgTestResult" class="doclist" style="margin-top:10px" data-page-node-id="u6FCQ7LWPzFm0GH7jXlOgT"><div class="empty" data-page-node-id="PPiOSli7IZRAnYz4P0P3X9">点上面按钮，系统会连一次你的系统并显示结果。</div></div>
         </div>
 
+                <h2 style="margin-top:18px" data-page-node-id="corsH2"><span class="dot" data-page-node-id="corsDot"></span>② 跨域白名单（仅外部页面调本服务时配）</h2>
+        <p class="hint" data-page-node-id="corsHint">默认空 = 仅同源（控制台自己用，够用）。把前端独立部署到 GitHub Pages / 其他域名 / <code>file://</code> 时才需要填。留空多个 origin 用逗号分隔，含协议和端口（如 <code>https://yourname.github.io</code>）。</p>
+        <label data-page-node-id="corsOriginsLbl">允许的来源（逗号分隔）</label>
+        <input type="text" id="KB_CORS_ORIGINS" placeholder="如 https://yourname.github.io, http://localhost:5173" data-page-node-id="KB_CORS_ORIGINS" />
+        <div style="margin:8px 0 4px;display:flex;gap:8px;align-items:center" data-page-node-id="corsDevRow">
+          <label style="display:flex;align-items:center;gap:6px;margin:0;cursor:pointer" data-page-node-id="corsDevLbl">
+            <input type="checkbox" id="KB_CORS_DEV_OPEN" data-page-node-id="KB_CORS_DEV_OPEN" />
+            <span>开启 <b>dev 模式</b>（任意 origin 通过，<span style="color:#c0392b">非生产用</span>）</span>
+          </label>
+        </div>
+
         <!-- 步骤② 模型 -->
         <h2 style="margin-top:18px" data-page-node-id="A35P4nguE6I08EuLBqC32K"><span class="dot" data-page-node-id="68pvnk0ypO4uWG6InehXGr"></span>② AI 智能回答（可选，更自然）</h2>
         <p class="hint" data-page-node-id="RtFfMxb1HDXHPBvGLmZrDX">不填也能用：助手会自动从知识库里摘取原文回答。想让回答更通顺自然，接一个大模型即可。</p>
@@ -1154,7 +1165,8 @@ const CFG_FIELDS = [
   "KB_ORDER_API_URL","KB_ORDER_PATH_TPL","KB_ORDER_STATUS_PATH","KB_ORDER_CARRIER_PATH","KB_ORDER_ETA_PATH","KB_ORDER_TEST_ID",
   "KB_INVENTORY_API_URL","KB_INVENTORY_PATH_TPL","KB_INVENTORY_STOCK_PATH","KB_INVENTORY_WAREHOUSE_PATH","KB_INVENTORY_TEST_SKU",
   "KB_LLM_PROVIDER","KB_LLM_MODEL","KB_LLM_BASE_URL","KB_LLM_API_KEY",
-  "KB_GUARDRAIL_MIN_CONFIDENCE"
+  "KB_GUARDRAIL_MIN_CONFIDENCE",
+  "KB_CORS_ORIGINS","KB_CORS_DEV_OPEN",
 ];
 let _cfgKeySet = false, _llmKeySet = false;
 
@@ -1162,9 +1174,16 @@ function cfgCollect(skipEmptyKey){
   // 不再特殊跳过 masked key：让 input 当前值（空或非空）都进 body，
   // 后端 /api/config 的 if not v: continue 会兜底「空=不覆盖」语义。
   // 旧逻辑在 !_llmKeySet=false 时会静默吞掉新 key，已移除。
+  // checkbox 走 checked ? "1" : "0"，与普通 text input 统一走 .value.trim()。
   const body = {};
   for(const k of CFG_FIELDS){
-    body[k] = $(k).value.trim();
+    const el = $(k);
+    if(!el) continue;
+    if(el.type === 'checkbox'){
+      body[k] = el.checked ? "1" : "0";
+    }else{
+      body[k] = el.value.trim();
+    }
   }
   body.KB_LLM_ENABLED = ($('KB_LLM_PROVIDER').value === "none") ? "0" : "1";
   return body;
@@ -1186,7 +1205,12 @@ async function loadConfig(){
   const j = await (await fetch(API('/api/config'))).json();
   for(const k of CFG_FIELDS){
     if(k==="KB_API_KEY" || k==="KB_LLM_API_KEY"){ continue; }
-    if($(k)) $(k).value = j[k]!==undefined ? j[k] : "";
+    if(!$(k)) continue;
+    if($(k).type === 'checkbox'){
+      $(k).checked = (j[k] === "1" || j[k] === true);
+    }else{
+      $(k).value = j[k]!==undefined ? j[k] : "";
+    }
   }
   _cfgKeySet = !!j._key_set;
   _llmKeySet = !!j._llm_key_set;

@@ -91,6 +91,7 @@ API_CONFIG_KEYS = [
     "KB_INVENTORY_WAREHOUSE_PATH", "KB_INVENTORY_TEST_SKU",
     "KB_LLM_ENABLED", "KB_LLM_PROVIDER", "KB_LLM_MODEL", "KB_LLM_BASE_URL", "KB_LLM_API_KEY",
     "KB_GUARDRAIL_MIN_CONFIDENCE",
+    "KB_CORS_ORIGINS", "KB_CORS_DEV_OPEN",
 ]
 _KEY_MASK = "***已设置***"
 _MASKED_KEYS = ("KB_API_KEY", "KB_LLM_API_KEY")
@@ -221,25 +222,40 @@ def _metrics_inc(path: str, is_error: bool, extra: dict | None):
 
 class Handler(BaseHTTPRequestHandler):
     def _cors_headers(self) -> None:
-        """CORS：默认放行 KB_CORS_ORIGINS 列表；空 = 仅同源。"""
+        """CORS 策略（按优先级判断）：
+        1. KB_CORS_DEV_OPEN=1：dev 模式，Access-Control-Allow-Origin: *，非 credentials。
+           仅供开发期调试（前端开在 file:// / 其他端口 / 外部域名都能直连），
+           生产环境务必保持关闭。
+        2. 否则按 KB_CORS_ORIGINS 列表（runtime_config 优先，回落环境变量，逗号分隔）
+           放行，匹配则 echo origin + credentials=true。
+        3. 空 = 仅同源（浏览器天然不查 CORS 头）。
+        Allow-Headers 永远放行 Authorization/Content-Type/X-Requested-With/
+        X-KB-Token（或 KB_API_AUTH_HEADER 自定义头名）。
+        """
         origin = self.headers.get("Origin", "")
-        allowed = settings.cors_origins  # list[str]
+        auth_hdr = str(get_cfg("KB_API_AUTH_HEADER", "X-KB-Token") or "X-KB-Token")
+        allow_hdrs = ", ".join(dict.fromkeys(
+            ["Authorization", "Content-Type", "X-Requested-With", auth_hdr]
+        ))
+
+        # dev 模式：所有 origin 通过（不带 credentials，避免与 * 冲突）
+        if get_cfg("KB_CORS_DEV_OPEN", "").lower() in ("1", "true", "yes"):
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Headers", allow_hdrs)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Max-Age", "600")
+            return
+
+        # 白名单模式：runtime_config 覆盖 env，便于页面热改无需重启
+        allowed_raw = get_cfg("KB_CORS_ORIGINS", ",".join(settings.cors_origins))
+        allowed = [o.strip() for o in allowed_raw.split(",") if o.strip()]
         if allowed and origin in allowed:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Credentials", "true")
-            # X-KB-Token（或 KB_API_AUTH_HEADER 自定义头名）必须显式放行：
-            # 否则浏览器预检会以 "Request header field x-kb-token is not allowed" 直接失败，
-            # 表现为「接口明明 200，前端就是报错」。
-            auth_hdr = get_cfg("KB_API_AUTH_HEADER", "X-KB-Token") or "X-KB-Token"
-            allow_hdrs = ["Authorization", "Content-Type", "X-Requested-With", str(auth_hdr)]
-            self.send_header(
-                "Access-Control-Allow-Headers",
-                ", ".join(dict.fromkeys(allow_hdrs)),  # 去重且保序
-            )
-            self.send_header(
-                "Access-Control-Allow-Methods", "GET, POST, OPTIONS"
-            )
+            self.send_header("Access-Control-Allow-Headers", allow_hdrs)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Max-Age", "600")
 
     def _send_json(self, code: int, obj) -> None:
@@ -680,7 +696,14 @@ if __name__ == "__main__":
         _probe.close()
     auth = f" 鉴权=开(KB_API_TOKEN)" if settings.api_token else " 鉴权=关"
     rl = f" 限流={settings.rate_limit}/min" if settings.rate_limit else " 限流=关"
-    print(f"知识库演示控制台已启动: 0.0.0.0:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl})")
+    # CORS 启动状态横幅：让用户一眼知道当前是「仅同源」「白名单」还是「dev 全放行」
+    if get_cfg("KB_CORS_DEV_OPEN", "").lower() in ("1", "true", "yes"):
+        cors = " CORS=DEV_OPEN(全放行·勿上生产)"
+    else:
+        _alw_raw = get_cfg("KB_CORS_ORIGINS", ",".join(settings.cors_origins))
+        _alw = [o.strip() for o in _alw_raw.split(",") if o.strip()]
+        cors = f" CORS=白名单({len(_alw)}项)" if _alw else " CORS=仅同源"
+    print(f"知识库演示控制台已启动: 0.0.0.0:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl}{cors})")
     # 一键体验：自动打开默认浏览器
     try:
         webbrowser.open(f"http://localhost:{port}")
