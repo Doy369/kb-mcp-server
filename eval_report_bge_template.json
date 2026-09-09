@@ -1,31 +1,14 @@
 {
   "total": 11,
-  "passed": 9,
-  "pass_rate": 0.818,
-  "avg_recall": 0.909,
-  "avg_confidence": 0.785,
-  "latency_p50_ms": 1985.0,
-  "latency_p95_ms": 2662.0,
-  "avg_graph_paths": 3.73,
+  "passed": 11,
+  "pass_rate": 1.0,
+  "avg_recall": 1.0,
+  "avg_confidence": 0.791,
+  "latency_p50_ms": 877.0,
+  "latency_p95_ms": 3104.0,
+  "avg_graph_paths": 4.55,
   "recall_threshold": 0.6,
-  "failed_cases": [
-    {
-      "question": "如何申请退货",
-      "missed": [
-        "7 个自然日"
-      ],
-      "forbidden": [],
-      "recall": 0.5
-    },
-    {
-      "question": "下单后多久发货",
-      "missed": [
-        "48 小时"
-      ],
-      "forbidden": [],
-      "recall": 0.5
-    }
-  ],
+  "failed_cases": [],
   "rows": [
     {
       "question": "如何申请退货",
@@ -34,19 +17,18 @@
         "7 个自然日"
       ],
       "hit": [
-        "退货"
-      ],
-      "missed": [
+        "退货",
         "7 个自然日"
       ],
+      "missed": [],
       "forbidden": [],
-      "recall": 0.5,
+      "recall": 1.0,
       "confidence": 0.78,
-      "latency_ms": 2618,
-      "graph_paths": 3,
+      "latency_ms": 3104,
+      "graph_paths": 5,
       "live": 0,
-      "method": "llm",
-      "passed": false
+      "method": "template",
+      "passed": true
     },
     {
       "question": "怎么开具发票",
@@ -62,10 +44,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.805,
-      "latency_ms": 2559,
+      "latency_ms": 877,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -75,19 +57,18 @@
         "出库"
       ],
       "hit": [
+        "48 小时",
         "出库"
       ],
-      "missed": [
-        "48 小时"
-      ],
+      "missed": [],
       "forbidden": [],
-      "recall": 0.5,
+      "recall": 1.0,
       "confidence": 0.846,
-      "latency_ms": 1648,
+      "latency_ms": 906,
       "graph_paths": 5,
       "live": 1,
-      "method": "llm",
-      "passed": false
+      "method": "template",
+      "passed": true
     },
     {
       "question": "如何开通子账号",
@@ -103,10 +84,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.841,
-      "latency_ms": 1985,
+      "latency_ms": 1066,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -123,10 +104,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.762,
-      "latency_ms": 1987,
+      "latency_ms": 1199,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -141,10 +122,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.706,
-      "latency_ms": 1915,
+      "latency_ms": 1155,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -158,11 +139,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.736,
-      "latency_ms": 1625,
-      "graph_paths": 0,
+      "confidence": 0.796,
+      "latency_ms": 868,
+      "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -179,10 +160,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.848,
-      "latency_ms": 2662,
-      "graph_paths": 3,
+      "latency_ms": 784,
+      "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -199,10 +180,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.845,
-      "latency_ms": 1903,
+      "latency_ms": 744,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -217,10 +198,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.852,
-      "latency_ms": 1625,
+      "latency_ms": 746,
       "graph_paths": 5,
       "live": 1,
-      "method": "llm",
+      "method": "template",
       "passed": true
     },
     {
@@ -235,10 +216,10 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.615,
-      "latency_ms": 2338,
+      "latency_ms": 801,
       "graph_paths": 0,
       "live": 1,
-      "method": "llm",
+      "method": "template",
       "passed": true
     }
   ]

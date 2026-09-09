@@ -41,3 +41,4 @@ dist/
 *.spec
 kb-mcp-server.exe
 exe_test.log
+.eval_runtime/
