@@ -489,6 +489,17 @@ const API = (path) => (window.KB_API_BASE || "") + path;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => (s||'').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
+function llmTag(s){
+  // LLM 失败会静默回退模板：这里必须把后端记录的失败原因暴露出来，
+  // 否则「答案永远是关系路径碎片」只能靠抓包才能定位。
+  if(!s.llm_enabled) return `<span class="tag gray">LLM合成：关（走模板）</span>`;
+  if(s.llm_ok) return `<span class="tag green">LLM合成：开</span>`;
+  const err = s.llm_last_error || '未知原因（后端未上报）';
+  const shown = String(err).replace(/'/g, "\'").replace(/\n/g, ' ');
+  return `<span class="tag amber" style="cursor:help" title="${esc(err)}"
+    onclick="alert('LLM 调用失败，答案已回退为模板：\n\n' + '${shown}')">⚠ LLM 不可用·答案回退模板</span>`;
+}
+
 async function refreshStatus(){
   let s;
   try {
@@ -505,7 +516,7 @@ async function refreshStatus(){
   $('status').innerHTML =
     `<span class="tag">存储：${s.backend}</span>` +
     `<span class="tag">嵌入：${s.embedding}</span>` +
-    `<span class="tag ${s.llm_enabled?'green':'gray'}">LLM合成：${s.llm_enabled?'开':'关'}</span>` +
+    llmTag(s) +
     `<span class="tag gray">已索引：${s.count}</span>` +
     `<span class="tag ${s.auth_required?'amber':'gray'}">鉴权：${s.auth_required?'开':'关'}</span>` +
     `<span class="tag gray">限流：${s.rate_limit||'关'}</span>`;

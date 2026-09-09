@@ -26,8 +26,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from kb_mcp_server.adapters import adapter_status, fetch_live, reload_adapters, self_check
-from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, DATA_DIR
+from kb_mcp_server.config import get_settings, load_runtime_config, set_cfg, get_cfg, DATA_DIR
 from kb_mcp_server.embeddings import get_embedder
+from kb_mcp_server.llmclient import llm_last_error, llm_last_ok_at
 from kb_mcp_server.extensions import install_default_guardrail
 from kb_mcp_server.graph import expand_facts, get_graph_store
 from kb_mcp_server.ingestion import IngestionPipeline
@@ -227,9 +228,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Credentials", "true")
+            # X-KB-Token（或 KB_API_AUTH_HEADER 自定义头名）必须显式放行：
+            # 否则浏览器预检会以 "Request header field x-kb-token is not allowed" 直接失败，
+            # 表现为「接口明明 200，前端就是报错」。
+            auth_hdr = get_cfg("KB_API_AUTH_HEADER", "X-KB-Token") or "X-KB-Token"
+            allow_hdrs = ["Authorization", "Content-Type", "X-Requested-With", str(auth_hdr)]
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Authorization, Content-Type, X-Requested-With",
+                ", ".join(dict.fromkeys(allow_hdrs)),  # 去重且保序
             )
             self.send_header(
                 "Access-Control-Allow-Methods", "GET, POST, OPTIONS"
@@ -306,7 +312,16 @@ class Handler(BaseHTTPRequestHandler):
             return 200, {
                 "backend": settings.storage_backend,
                 "embedding": settings.embedding_backend,
-                "llm_enabled": settings.llm_enabled,
+                # 以运行时配置为准（合成模块读 get_cfg，env 只是默认值），
+                # 否则会出现「页面显示 LLM 关、实际按开尝试再回退模板」的状态错位。
+                "llm_enabled": get_cfg(
+                    "KB_LLM_ENABLED", "1" if settings.llm_enabled else "0"
+                ).lower() in ("1", "true", "yes"),
+                "llm_base_url": get_cfg("KB_LLM_BASE_URL", "http://localhost:11434/v1"),
+                # LLM 失败一律静默回退模板，必须把失败原因/上次成功时间暴露出来，
+                # 否则「答案永远是模板碎片」只能靠猜。
+                "llm_ok": llm_last_ok_at() > 0,
+                "llm_last_error": llm_last_error(),
                 "count": _store.count(),
                 "auth_required": bool(settings.api_token),
                 "rate_limit": settings.rate_limit,
