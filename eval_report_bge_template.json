@@ -4,8 +4,8 @@
   "pass_rate": 1.0,
   "avg_recall": 1.0,
   "avg_confidence": 0.791,
-  "latency_p50_ms": 877.0,
-  "latency_p95_ms": 3104.0,
+  "latency_p50_ms": 575.0,
+  "latency_p95_ms": 811.0,
   "avg_graph_paths": 4.55,
   "recall_threshold": 0.6,
   "failed_cases": [],
@@ -24,10 +24,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.78,
-      "latency_ms": 3104,
+      "latency_ms": 811,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -44,10 +45,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.805,
-      "latency_ms": 877,
+      "latency_ms": 515,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -64,10 +66,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.846,
-      "latency_ms": 906,
+      "latency_ms": 649,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -84,10 +87,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.841,
-      "latency_ms": 1066,
+      "latency_ms": 574,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -104,10 +108,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.762,
-      "latency_ms": 1199,
+      "latency_ms": 590,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -122,10 +127,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.706,
-      "latency_ms": 1155,
+      "latency_ms": 515,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -140,10 +146,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.796,
-      "latency_ms": 868,
+      "latency_ms": 575,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -160,10 +167,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.848,
-      "latency_ms": 784,
+      "latency_ms": 514,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -180,10 +188,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.845,
-      "latency_ms": 744,
+      "latency_ms": 576,
       "graph_paths": 5,
       "live": 0,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -198,10 +207,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.852,
-      "latency_ms": 746,
+      "latency_ms": 562,
       "graph_paths": 5,
       "live": 1,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     },
     {
@@ -216,10 +226,11 @@
       "forbidden": [],
       "recall": 1.0,
       "confidence": 0.615,
-      "latency_ms": 801,
+      "latency_ms": 606,
       "graph_paths": 0,
       "live": 1,
       "method": "template",
+      "match_mode": "raw+normalized",
       "passed": true
     }
   ]
