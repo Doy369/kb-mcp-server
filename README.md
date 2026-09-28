@@ -23,7 +23,6 @@
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
 - **质量保障（P2-10）**：**119 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI**
   （单测 → 回归评测 → 基线校验，通过率低于阈值即阻断合并）。
-- **桌面客户端**：可用 PyInstaller 打包为单文件 exe，原生窗口承载控制台（pywebview）。
 
 ---
 
@@ -83,7 +82,6 @@ kb-mcp-server/
 │   └── __main__.py
 ├── app.py                  # Web 控制台（HTTP 服务 + 前端）
 ├── run_demo.py             # 演示入口（离线播种，用于云端/演示部署）
-├── client.py               # 桌面客户端（pywebview 原生窗口）
 ├── static/index.html       # 前端控制台页面（含知识图谱面板）
 ├── demo_offline.py         # 离线自检脚本（摄取→检索整条链路）
 ├── demo_graph.py           # 图谱自检脚本（建图→多跳→推理路径→融合答复）
@@ -369,53 +367,6 @@ LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，�
 几分钟后站点出现在 `https://<user>.github.io/kb-mcp-server/`（默认 Doy369 用户）。
 
 无需修改任何代码——`docs/index.html` 里 `window.KB_API_BASE` 保持空字符串即可。
-
----
-
-### 可选扩展 · Render（前后端分离，可真实检索）
-
-> 在 Pages 基础上，把 Flask 后端也部署到 Render 免费层，浏览器可上传/检索真实语料。
->
-> **架构**：静态前端在 `https://<user>.github.io/kb-mcp-server/`，后端在 Render，跨域由 `KB_CORS_ORIGINS` 控制。
-
-**Step 1 · Render 部署后端**
-
-1. 注册 [render.com](https://render.com)，Dashboard → **New +** → **Web Service** → 选 `Doy369/kb-mcp-server`。
-2. 配置：
-   - **Runtime**: Python
-   - **Build Command**: 留空（自动用 `requirements.txt`）
-   - **Start Command**: `python app.py`
-   - **Instance Type**: Free
-   - **Health Check Path**: `/healthz`
-3. Environment：
-   - `KB_CORS_ORIGINS` = `https://Doy369.github.io`（多 origin 用英文逗号分隔）
-4. 部署完记下 Render URL（如 `https://kb-mcp-server.onrender.com`）。
-
-**Step 2 · 绑定前端到后端**
-
-编辑 `docs/index.html`，把
-```js
-window.KB_API_BASE = ""; // ← 仅前端部署保持空；接后端时填 Render URL
-```
-改成
-```js
-window.KB_API_BASE = "https://kb-mcp-server.onrender.com"; // ← 仅前端部署保持空；接后端时填 Render URL
-```
-
-几分钟后 Pages 重建，页面顶部"📦 静态演示模式"横幅消失，搜索/对话即可真实工作。
-
-> 注：Render 免费层冷启动 ~30s（首次访问等一会儿）；后端用 memory 后端，**重启会丢语料**。
-
----
-
-## 🖥 桌面客户端（可选）
-
-```bash
-pip install pywebview
-python client.py            # 原生窗口承载控制台
-# 打包为单文件 exe：
-pyinstaller kb-mcp-client-v2.spec
-```
 
 ---
 
