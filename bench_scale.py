@@ -18,6 +18,7 @@
 """
 
 import json
+import math
 import os
 import random
 import re
@@ -99,6 +100,47 @@ def main() -> None:
                 hit += 1
         return hit / len(idxs)
 
+    # ---- 精排指标（补齐 Recall 之外的排序质量口径）----
+    # Recall 只回答「有没有召回到」，不回答「排在第几位」；MMR / 阈值 / 重排
+    # 这些下游环节影响的正是排序，缺了 MRR 就没法量化它们到底有没有起作用。
+    def semantic_mrr() -> float:
+        """语义 MRR：第一个命中同义正确答案的排名取倒数，再全样本平均。"""
+        total = 0.0
+        for j, i in enumerate(idxs):
+            correct = set(gt[norm_q(rows[i]["user"])])
+            for rank, cand in enumerate(order[j].tolist(), 1):
+                if cand in correct:
+                    total += 1.0 / rank
+                    break
+        return total / len(idxs)
+
+    def semantic_ndcg(k: int) -> float:
+        """语义 NDCG@k（二值相关性）：多相关样本时按位置折损求和后归一。
+
+        与 Recall 的区别：正确答案排第 5 与排第 1 的得分不同，因此能反映
+        排序质量。语料含同义重复，正确答案不止一条，故 ideal DCG 取
+        min(k, 相关样本数) 个满分位。
+        """
+        gains = 0.0
+        for j, i in enumerate(idxs):
+            correct = set(gt[norm_q(rows[i]["user"])])
+            dcg = sum(1.0 / math.log2(rank + 1)
+                      for rank, cand in enumerate(order[j, :k].tolist(), 1)
+                      if cand in correct)
+            ideal_n = min(k, len(correct))
+            idcg = sum(1.0 / math.log2(rank + 1) for rank in range(1, ideal_n + 1))
+            gains += (dcg / idcg) if idcg > 0 else 0.0
+        return gains / len(idxs)
+
+    def semantic_precision(k: int) -> float:
+        """语义 Precision@k：top-k 中命中同义正确答案的比例（衡量噪声）。"""
+        total = 0.0
+        for j, i in enumerate(idxs):
+            correct = set(gt[norm_q(rows[i]["user"])])
+            topk = order[j, :k].tolist()
+            total += sum(1 for c in topk if c in correct) / max(1, len(topk))
+        return total / len(idxs)
+
     print("[bench] 严格 Recall（命中自己的 chunk）:", flush=True)
     for k in (1, 3, 5):
         print(f"  Recall@{k}: {strict_recall(k):.1%}", flush=True)
@@ -106,6 +148,13 @@ def main() -> None:
     print("[bench] 语义 Recall（命中任意同义问题的答案）:", flush=True)
     for k in (1, 3, 5):
         print(f"  Recall@{k}: {semantic_recall(k):.1%}", flush=True)
+
+    print("[bench] 精排指标（语义口径）:", flush=True)
+    print(f"  MRR      : {semantic_mrr():.3f}", flush=True)
+    for k in (1, 3, 5):
+        print(f"  NDCG@{k}  : {semantic_ndcg(k):.3f}", flush=True)
+    for k in (1, 3, 5):
+        print(f"  P@{k}     : {semantic_precision(k):.1%}", flush=True)
 
     top1_sim = float(np.mean(sim[np.arange(len(idxs)), order[:, 0]]))
     print(f"  平均 top-1 相似度: {top1_sim:.4f}", flush=True)
@@ -129,6 +178,9 @@ def main() -> None:
         "dup_chunks": sum(len(v) for v in gt.values() if len(v) > 1),
         "strict_recall_at": {str(k): round(strict_recall(k), 4) for k in (1, 3, 5)},
         "semantic_recall_at": {str(k): round(semantic_recall(k), 4) for k in (1, 3, 5)},
+        "semantic_mrr": round(semantic_mrr(), 4),
+        "semantic_ndcg_at": {str(k): round(semantic_ndcg(k), 4) for k in (1, 3, 5)},
+        "semantic_precision_at": {str(k): round(semantic_precision(k), 4) for k in (1, 3, 5)},
         "avg_top1_sim": round(top1_sim, 4),
         "elapsed_s": round(time.time() - t0, 1),
     }
