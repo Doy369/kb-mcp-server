@@ -1,14 +1,25 @@
 {
   "total": 11,
-  "passed": 11,
-  "pass_rate": 1.0,
-  "avg_recall": 1.0,
-  "avg_confidence": 0.791,
-  "latency_p50_ms": 1591.0,
-  "latency_p95_ms": 2701.0,
+  "passed": 10,
+  "pass_rate": 0.909,
+  "avg_recall": 0.909,
+  "avg_confidence": 0.541,
+  "latency_p50_ms": 81.0,
+  "latency_p95_ms": 606.0,
   "avg_graph_paths": 4.55,
   "recall_threshold": 0.6,
-  "failed_cases": [],
+  "failed_cases": [
+    {
+      "question": "P2 问题多久响应",
+      "missed": [
+        "4 小时"
+      ],
+      "forbidden": [
+        "15 分钟"
+      ],
+      "recall": 0.0
+    }
+  ],
   "rows": [
     {
       "question": "如何申请退货",
@@ -23,11 +34,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.78,
-      "latency_ms": 2701,
+      "confidence": 0.535,
+      "latency_ms": 606,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -44,11 +55,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.805,
-      "latency_ms": 1804,
+      "confidence": 0.696,
+      "latency_ms": 76,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -65,11 +76,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.846,
-      "latency_ms": 1278,
+      "confidence": 0.573,
+      "latency_ms": 91,
       "graph_paths": 5,
       "live": 1,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -86,11 +97,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.841,
-      "latency_ms": 2178,
+      "confidence": 0.503,
+      "latency_ms": 80,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -107,11 +118,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.762,
-      "latency_ms": 1612,
+      "confidence": 0.494,
+      "latency_ms": 81,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -120,19 +131,21 @@
       "expect": [
         "4 小时"
       ],
-      "hit": [
+      "hit": [],
+      "missed": [
         "4 小时"
       ],
-      "missed": [],
-      "forbidden": [],
-      "recall": 1.0,
-      "confidence": 0.706,
-      "latency_ms": 1515,
+      "forbidden": [
+        "15 分钟"
+      ],
+      "recall": 0.0,
+      "confidence": 0.407,
+      "latency_ms": 77,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
-      "passed": true
+      "passed": false
     },
     {
       "question": "月度故障时长不超过多少",
@@ -145,11 +158,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.796,
-      "latency_ms": 1261,
+      "confidence": 0.614,
+      "latency_ms": 78,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -166,11 +179,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.848,
-      "latency_ms": 1825,
+      "confidence": 0.541,
+      "latency_ms": 81,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -187,11 +200,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.845,
-      "latency_ms": 1424,
+      "confidence": 0.72,
+      "latency_ms": 106,
       "graph_paths": 5,
       "live": 0,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -206,11 +219,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.852,
-      "latency_ms": 1591,
+      "confidence": 0.538,
+      "latency_ms": 75,
       "graph_paths": 5,
       "live": 1,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     },
@@ -225,11 +238,11 @@
       "missed": [],
       "forbidden": [],
       "recall": 1.0,
-      "confidence": 0.615,
-      "latency_ms": 1475,
+      "confidence": 0.332,
+      "latency_ms": 88,
       "graph_paths": 0,
       "live": 1,
-      "method": "llm",
+      "method": "template",
       "match_mode": "raw+normalized",
       "passed": true
     }

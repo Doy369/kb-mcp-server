@@ -1,0 +1,74 @@
+name: CI
+
+# 每次 PR / 主干推送都跑：单测 → 回归评测。
+# 关键在最后一步——评测通过率低于基线时 CI 变红，**卡住合并**。
+# 这样“我改完效果变好了”就不再是主观判断，而是流水线上的一个布尔值。
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 单测 + 回归评测（离线）
+    runs-on: ubuntu-latest
+
+    env:
+      # 只装离线依赖：memory 后端 + dev 嵌入 + 确定性编排，零外部服务
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+      KB_CHUNK_STRATEGY: fine
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（仅离线必需项）
+        run: |
+          python -m pip install --upgrade pip
+          # 不装 sentence-transformers / psycopg / pgvector —— CI 保持快且零外部依赖。
+          # 这些只在 bge / pgvector 模式下才需要，由本地或专门的 job 验证。
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25
+
+      # ------------------------------------------------------------------ #
+      # 1) 单测：分层覆盖数据 / 检索 / 评测 / 护栏 / Agent / 降级
+      # ------------------------------------------------------------------ #
+      - name: 运行单测
+        run: python -m pytest tests/ -v --tb=short
+
+      # ------------------------------------------------------------------ #
+      # 2) 回归评测：跑 golden 集，产出可对比的基线指标
+      #    eval_run.py 自建独立 store，每次重新播种，结果可复现。
+      # ------------------------------------------------------------------ #
+      - name: 运行回归评测
+        run: python eval_run.py
+
+      - name: 校验评测基线（通过率不得低于阈值）
+        run: python scripts/check_baseline.py
+
+      # ------------------------------------------------------------------ #
+      # 3) 归档产物：报告随 CI 运行留痕，便于事后对比与面试展示
+      # ------------------------------------------------------------------ #
+      - name: 上传评测报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: |
+            eval_report.json
+            kb_store_eval.json
+          retention-days: 30
+          if-no-files-found: warn
