@@ -1,8 +1,12 @@
-"""本地模拟 CI 的评测基线校验步骤，确保该段脚本在 Python 3.9+ 语法下可跑。
+"""评测基线校验：通过率低于阈值即退出码 1，用于阻断合并。
 
-这段逻辑与 .github/workflows/ci.yml 中的内联脚本保持一致：
-CI 里用 heredoc 内联执行，这里保留一份可本地复现的等价实现，
-避免「CI 上才发现的语法/路径问题」这类只能在远端暴露的故障。
+**本地与 CI 共用同一份实现**——.github/workflows/ci.yml 直接调用本脚本，
+不内联复制逻辑，避免两处阈值/口径漂移。
+
+本地复现 CI 的完整三步：
+    python -m pytest tests/ -q     # 单测
+    python eval_run.py             # 回归评测（产出 eval_report.json）
+    python scripts/check_baseline.py   # 本脚本，通过则退出码 0
 """
 
 from __future__ import annotations
@@ -14,7 +18,9 @@ import sys
 
 _HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 基线阈值：CI 用 dev 嵌入（不下载 1.3GB 模型、不装 torch），实测通过率 82%。
+# 基线阈值：CI 用 dev 嵌入（不下载 1.3GB 模型、不装 torch）。
+# 实测 dev 通过率：语义级断言前 82%（9/11，P2 哨兵用例受限于字面区分能力），
+# 断言后 91%（10/11，仅剩同一哨兵用例 FAIL）。
 # 取 0.72 留出余量——阈值贴着实测值会让 CI 变得噪音化，最终被人习惯性忽略；
 # 定太低则失去拦截作用。bge 下的 100% 基线由本地/带模型的 job 单独验证。
 MIN_PASS_RATE = 0.72

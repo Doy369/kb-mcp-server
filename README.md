@@ -21,6 +21,8 @@
   - 嵌入：`dev`（离线条目哈希，零依赖）⇄ `bge`（sentence-transformers 本地模型，数据不出域）。
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
+- **质量保障（P2-10）**：**119 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI**
+  （单测 → 回归评测 → 基线校验，通过率低于阈值即阻断合并）。
 - **桌面客户端**：可用 PyInstaller 打包为单文件 exe，原生窗口承载控制台（pywebview）。
 
 ---
@@ -89,6 +91,13 @@ kb-mcp-server/
 ├── setup_db.py             # pgvector 建表初始化（--graph 额外初始化 AGE 图）
 ├── make_samples.py         # 生成多格式测试样本
 ├── fake_order_api.py       # 本地假订单后端（验证字段映射用）
+├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
+├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
+├── pytest.ini
+├── tests/                  # 自动化测试（119 例，离线零依赖，见 tests/README.md）
+├── scripts/
+│   └── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
+├── .github/workflows/ci.yml  # CI：单测 → 回归评测 → 基线校验
 ├── requirements.txt
 ├── .env.example            # 全部配置项示例
 └── samples/ test-docs/     # 示例知识库文档
@@ -406,6 +415,46 @@ pip install pywebview
 python client.py            # 原生窗口承载控制台
 # 打包为单文件 exe：
 pyinstaller kb-mcp-client-v2.spec
+```
+
+---
+
+## 🧪 质量保障（P2-10）
+
+### 自动化测试
+
+```bash
+pip install pytest
+python -m pytest tests/ -v      # 119 例，离线约 11s
+```
+
+覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
+
+| 文件 | 例数 | 覆盖重点 |
+|---|---|---|
+| `test_ingestion_storage.py` | 32 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、图谱本体约束 |
+| `test_retrieval.py` | 27 | **BM25 分数越界回归护栏**、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
+| `test_eval_guardrail.py` | 36 | **数字边界断言**（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
+| `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、**降级链路**、合成契约、14 工具注册完整性 |
+
+> 其中三条用例直接锁住 ROADMAP 记录过的真 bug——**不报错、只是答案悄悄变差**的那类问题，
+> 没有测试就只能靠肉眼发现。
+
+### CI 流水线
+
+`.github/workflows/ci.yml`：**单测 → 回归评测 → 基线校验** 三段串行。
+通过率低于基线（72%）时 CI 变红**阻断合并**，评测报告作为 artifact 归档 30 天。
+
+**为何 CI 不跑 bge**：dev 嵌入下通过率 91%（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
+受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 100%。
+CI 装 torch + 1.3GB 模型会让单次运行从 11s 涨到数分钟——
+因此 **CI 保「快」与「不许变差」，bge 保「质量上限」（本地验证）**。
+
+### 本地复现 CI 的基线校验
+
+```bash
+python eval_run.py              # 产出 eval_report.json
+python scripts/check_baseline.py   # 与 CI 同一份逻辑，通过则退出码 0
 ```
 
 ---
