@@ -1,14 +1,15 @@
 # 待解决优先级 · 上线路线图（ROADMAP）
 
-> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **40–45%**（2026-09-29 复核）。
+> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **50–55%**（2026-09-29 复核）。
 > 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 119 例 + CI 真实跑通、
 > 语料对齐、规模化召回评测。
 > 本文件列出通往「真正上线的 B2B 多 agent 协作共同体」的待办，按优先级排序；
 > 每项标注了**已预留的拓展接口**（位于 `kb_mcp_server/extensions.py`），补做时直接实现接口并注册即可，无需改动编排/合成主链路。
 >
-> ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`RetryPolicy`、`ActionTool` / `ActionToolRegistry`、
-> `TenantProvider` —— 这三组对应 P0-2 / P2-9 / P2-6，是「接口就位但功能未做」的准确标志。
-> （`Planner`、`AgentRegistry`、`Evaluator`、`ConfidenceGuardrail` 已真实接入。）
+> ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`ActionTool` / `ActionToolRegistry`、
+> `TenantProvider` —— 对应 P2-9 / P2-6，是「接口就位但功能未做」的准确标志。
+> （`Planner`、`AgentRegistry`、`Evaluator`、`ConfidenceGuardrail` 已真实接入；
+> `RetryPolicy` 已于 2026-09-29 由 `adapters` 真实接入，见 P0-2。）
 
 ---
 
@@ -36,14 +37,27 @@
 - 接口：**`Evaluator` / `load_golden()`**（已预留，P1-5）。
 
 ### P0-2 实时数据真实接入（订单/库存/CRM）
-- 现状（**部分具备**，2026-09-29 逐项核实）：
+- 现状（**韧性三件套已落地**，2026-09-29）：
   - ✅ 已有：真实 HTTP 路径、**超时**（`KB_API_TIMEOUT`）、**TTL 缓存**（`KB_API_TTL`）、
     **出站鉴权**（`KB_API_AUTH_SCHEME/HEADER/QUERY`，支持 bearer/header/query 三种）、
     字段映射可配（`KB_ORDER_STATUS_PATH` 等）、非法数值容错解析。
-  - ❌ 缺失：**重试**、**熔断**、**失败降级到兜底答案**；demo 仍强制 `KB_API_MOCK=1`。
-- 待补：接真实 endpoint + 加重试（指数退避）+ 熔断 + 降级。
-- 接口：**`RetryPolicy`**（已定义 `max_retries` / `timeout_s` / `backoff_s` / `circuit_breaker`，
-  但**全仓库零引用**——这是本项未做的准确标志）。
+  - ✅ **本轮补齐：重试（指数退避）+ 熔断 + 降级**，由 `extensions.RetryPolicy` / `CircuitBreaker`
+    实现、`adapters.APIAdapter` 接入（不再是「零引用空壳」）：
+    - **重试**：`KB_API_MAX_RETRIES`（总尝试 = 该值 + 1）、`KB_API_RETRY_BACKOFF`（指数退避基数，
+      `delay(n) = min(backoff * 2^(n-1), 8s)`，封顶防止一次问答被拖成分钟级）。
+    - **熔断**：连续失败达 `KB_API_CIRCUIT_THRESHOLD` 即开路，开路期**不再发起下游调用**
+      （实测从 `TimeoutError` 的 ~1s 降到 0.0001s）；冷却 `KB_API_CIRCUIT_COOLDOWN` 后放行一次
+      半开探测，成功闭合、失败重新计时。**每个适配器独立熔断**——订单 API 挂掉不连累库存查询。
+    - **降级**：重试耗尽**不抛异常**，返回 `degraded=True` 的结构化结果 → 归一化为 `degraded`
+      卡片 → 合成层写明「实时数据暂不可用（重试 N 次仍失败）」。实测 `/api/ask` 在订单与库存
+      后端全挂时仍正常返回知识依据，不 500。
+    - **失败不写缓存**：否则一次网络抖动会被 TTL 放大成持续 30s 的错误，并掩盖熔断的快速失败。
+    - **可观测**：`/api/status` 暴露每个适配器的 `circuit` 状态与 `degraded_calls` / `retries`
+      计数——熔断是「看不见的故障」，没有指标只能靠「实时数据一直不可用」反推。
+    此前 docstring 声称「统一重试」但 `_fetch` 一次失败即抛穿，属**文档过度承诺**，本轮一并纠正。
+  - ⏳ 仍待补：接**真实** endpoint 做一次线上联调（当前只有 mock 与「连不上」两种实测场景）。
+- 接口：`RetryPolicy` / `CircuitBreaker` / `Attempt`（`extensions.py`）。
+- 测试：`tests/test_adapters_resilience.py` 29 例（离线、零等待：sleep 注入为 no-op、HTTP 层被替身接管）。
 
 ### P0-3 生产级存储与向量真跑通
 - 现状（**Path A 已完成；Path B 向量侧已由 CI 实测通过，AGE 图侧待验**）：
@@ -328,18 +342,21 @@
 **已完成的历史首步**（保留供追溯）：
 1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
 2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
-3. ~~P2-10 测试 + CI~~：130 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+3. ~~P2-10 测试 + CI~~：159 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
 4. ~~P0-3 Path B（pgvector 生产存储）~~ → **✅ 已完成（2026-09-29）**：
    已在真实 PG 上跑通，并抓出/修掉 3 个只有真库才暴露的缺陷（见 P0-3 小节）。
+5. ~~P0-2（重试 / 熔断 / 降级）~~ → **✅ 已完成（2026-09-29）**：
+   `RetryPolicy` 不再是零引用空壳，外部后端不可用时整条问答链路平滑降级（见 P0-2 小节）。
 
 **下一批候选**：
 | 序 | 事项 | 投入 | 为什么现在做 |
 |---|---|---|---|
 | ~~1~~ | ~~验证 `docker build`~~ | — | **✅ 已完成（2026-09-29）**：已并入 CI `docker` job，构建+启动+冒烟全绿 |
 | ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29，run 36530049484 全绿）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
-| 1 | **P0-2：适配器重试 / 熔断 / 降级** | 中 | `RetryPolicy` 空壳已就位，`adapters.py` 已有 timeout + TTL + 鉴权，**只差重试与熔断**；这是「能不能接真实后端」的门槛 |
-| 2 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
-| 3 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
-| 4 | P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑 | 小 | CI 骨架已就位，加 job 即可 |
+| ~~1~~ | ~~P0-2：适配器重试 / 熔断 / 降级~~ | 中 | **✅ 已完成（2026-09-29）**：`RetryPolicy`/`CircuitBreaker` 已由 `adapters` 真实接入，重试+指数退避+按后端独立熔断+降级卡片全链路打通；29 例单测 |
+| 1 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
+| 2 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
+| 3 | **P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑** | 小 | CI 骨架已就位，加 job 即可 |
+| 4 | P0-2 收尾：接**真实** endpoint 联调 | 小 | 目前只实测了 mock 与「后端不可达」两种场景 |
 
-> 做完 P0-2，完成度可到 **~55%**；再做 P1-4，可到 **~65%**。
+> 做完 P1-4，完成度可到 **~65%**；再做完 P2-9，可到 **~75%**。

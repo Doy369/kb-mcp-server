@@ -90,6 +90,8 @@
   .live-item .k{color:var(--muted);min-width:54px}
   .mockbadge{font-size:10px;background:#fff;border:1px solid #cdeedd;color:var(--green);
     border-radius:999px;padding:1px 6px;margin-left:6px}
+  .warnbadge{font-size:10px;background:#fff;border:1px solid #f0d09a;color:#a86a00;
+    border-radius:999px;padding:1px 6px;margin-left:6px}
   .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#f0f1f3;color:var(--muted)}
   .pill.high{background:var(--green-soft);color:var(--green)}
   .pill.mid{background:var(--amber-soft);color:var(--amber)}
@@ -692,6 +694,9 @@ function renderLive(cards){
       ${c.mock?'<span class="mockbadge">mock</span>':''}</div>`;
     if(c.type==='prompt') return `<div class="live-item"><span class="k">提示</span>
       <span>${esc(c.adapter)}：${esc(c.note)}</span></div>`;
+    if(c.type==='degraded') return `<div class="live-item"><span class="k">实时</span>
+      <span>数据暂不可用：${c.short_circuited?'熔断开路（未发起调用）':'重试 '+esc(c.attempts)+' 次仍失败'}</span>
+      <span class="warnbadge">degraded</span></div>`;
     return '';
   }).join('');
   return `<div class="card-live"><div class="ttl">实时数据</div>${items}</div>`;

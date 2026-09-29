@@ -83,6 +83,24 @@ def _graph_lines(graph_facts: dict | None, limit: int = 5) -> list[str]:
     return [f["path"] for f in facts[:limit] if f.get("path")]
 
 
+def _live_line(c: dict) -> str:
+    """把一张实时卡片转成一行文本。**对未知类型也安全**（全部走 .get）。
+
+    P0-2 加 `degraded` 卡后，原先「else 分支直接取 c['note']」的写法会 KeyError，
+    把一次后端不可用升级成 /api/ask 500。这里改为显式分支 + 安全取值。
+    """
+    t = c.get("type")
+    if t == "order":
+        return (f"订单 {c.get('order_id')}：{c.get('status')}"
+                f"（{c.get('carrier', '')} 预计 {c.get('eta', '')}）")
+    if t == "inventory":
+        return f"SKU {c.get('sku')}：库存 {c.get('stock')}（{c.get('warehouse', '')}）"
+    if t == "degraded":
+        why = "熔断开路，未发起调用" if c.get("short_circuited") else f"重试 {c.get('attempts', 0)} 次仍失败"
+        return f"{c.get('adapter', '')}：实时数据暂不可用（{why}）"
+    return f"{c.get('adapter', '')}：{c.get('note', '')}"
+
+
 def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
                        graph_facts: dict | None = None) -> tuple[str, str]:
     """返回 (summary 摘要, detail 详情)。"""
@@ -94,12 +112,7 @@ def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
     if live_cards:
         parts.append("【实时数据】")
         for c in live_cards:
-            if c["type"] == "order":
-                parts.append(f"订单 {c['order_id']}：{c['status']}（{c.get('carrier', '')} 预计 {c.get('eta', '')}）")
-            elif c["type"] == "inventory":
-                parts.append(f"SKU {c['sku']}：库存 {c['stock']}（{c.get('warehouse', '')}）")
-            elif c["type"] == "prompt":
-                parts.append(f"{c['adapter']}：{c['note']}")
+            parts.append(_live_line(c))
 
     if graph_lines:
         parts.append("【关系路径】")
@@ -123,12 +136,7 @@ def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], his
     """调用本地 LLM 合成自然语言答复；任何异常返回 None（交由模板回退）。"""
     c = _llm_cfg()
     ctx = "\n".join(f"- {_clean_content(h['content'])}" for h in hits)
-    live_txt = "\n".join(
-        f"- 订单 {c['order_id']}：{c['status']}" if c["type"] == "order"
-        else f"- SKU {c['sku']}：库存 {c['stock']}" if c["type"] == "inventory"
-        else f"- {c['adapter']}：{c['note']}"
-        for c in live_cards
-    )
+    live_txt = "\n".join(_live_line(c) for c in live_cards)
     graph_txt = "\n".join(f"- {line}" for line in _graph_lines(graph_facts))
     prompt = (
         "你是企业 B2B 客服助手。仅依据给定的知识片段、关系事实与实时数据，用简洁中文回答用户问题，"

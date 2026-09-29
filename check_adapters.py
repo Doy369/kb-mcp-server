@@ -31,6 +31,13 @@ def main() -> None:
         else:
             print(f"    -> 真实调用失败 ❌：{a['error']}")
             print(f"    请求 URL：{a['url']}")
+            # P0-2：失败已不再抛异常，这里必须把「重试了几次 / 熔断是否开路」打出来，
+            # 否则用户只看到「失败」而不知道是网络问题还是已经进入熔断保护。
+            state = a.get("circuit", "closed")
+            if a.get("short_circuited"):
+                print(f"    熔断状态 {state}（已开路，本次**未发起调用**）")
+            else:
+                print(f"    已重试 {a.get('attempts', 0)} 次，熔断状态 {state}")
         print()
 
 

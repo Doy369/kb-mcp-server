@@ -21,7 +21,10 @@
   - 嵌入：`dev`（离线条目哈希，零依赖）⇄ `bge`（sentence-transformers 本地模型，数据不出域）。
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
-- **质量保障（P2-10）**：**130 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
+- **实时数据接入韧性（P0-2）**：订单 / 库存适配器统一支持**重试（指数退避）+ 熔断
+  （按后端独立，开路期不发调用）+ 降级**——后端不可用时返回 `degraded` 卡片并在答复中
+  写明「实时数据暂不可用」，问答主链路不中断；`/api/status` 暴露熔断状态与降级计数。
+- **质量保障（P2-10）**：**159 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据。
@@ -96,7 +99,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（130 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（159 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
 │   └── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
@@ -359,6 +362,11 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 | `KB_STORAGE_BACKEND` | `memory` | `memory` ⇄ `pgvector` |
 | `KB_EMBEDDING_BACKEND` | `dev` | `dev` ⇄ `bge` |
 | `KB_API_MOCK` | `1` | 实时数据走 mock |
+| `KB_API_MAX_RETRIES` | `2` | 实时后端重试次数（总尝试 = 该值 + 1） |
+| `KB_API_RETRY_BACKOFF` | `0.5` | 指数退避基数（秒），单次退避上限 8s |
+| `KB_API_CIRCUIT_BREAKER` | `1` | 熔断开关；开路期不再发起调用 |
+| `KB_API_CIRCUIT_THRESHOLD` | `5` | 连续失败多少次后开路 |
+| `KB_API_CIRCUIT_COOLDOWN` | `30` | 开路冷却秒数，之后放半开探测 |
 
 镜像内置 `HEALTHCHECK` 探 `/healthz`（`docker compose ps` 可直接看健康状态）。
 需要 pgvector 时，`docker-compose.yml` 里已备好注释掉的 `pgvector/pgvector:pg16` 服务，取消注释即可。

@@ -2,12 +2,14 @@
 
 设计目标：填了 URL + 字段路径就能真用，无需改代码。
 
-- APIAdapter 基类：统一鉴权（Bearer / 自定义请求头 / 查询参数）、超时、重试、TTL 缓存。
+- APIAdapter 基类：统一鉴权（Bearer / 自定义请求头 / 查询参数）、单次尝试超时、TTL 缓存，
+  以及 **P0-2 韧性三件套**——有限重试 + 指数退避、熔断（连续失败开路、冷却后半开探测）、
+  **降级**（重试耗尽不抛异常，返回带 `degraded` 标记的结构化结果，主链路不崩）。
 - 具体适配器：订单状态、库存。每个适配器通过环境变量配置：
   * 基址（KB_ORDER_API_URL / KB_INVENTORY_API_URL）
   * 路径模板（KB_ORDER_PATH_TPL，默认 /orders/{id}）
   * 响应字段路径（JSON 点路径，支持数组索引如 data.items[0].id）
-  * 鉴权方式、超时、缓存时长
+  * 鉴权方式、超时、缓存时长、重试次数与退避、熔断开关与阈值
 - 响应字段映射用 Pydantic 校验，缺失字段不报错、标记为 incomplete。
 - 默认 mock 模式：未配置真实 endpoint 或 KB_API_MOCK=1 时返回样例，离线即可演示；
   配置 URL 且 KB_API_MOCK=0 即走真实 HTTP。
@@ -28,10 +30,14 @@ from typing import Any
 from pydantic import BaseModel
 
 from kb_mcp_server.config import get_cfg
+from kb_mcp_server.extensions import CIRCUIT_CLOSED, RetryPolicy
 
 
 # --------------------------------------------------------------------------- #
 # 响应校验模型（Pydantic）：规范适配器输出的结构，缺失字段不抛错、标记 incomplete
+#
+# degraded / error / attempts 是 P0-2 降级语义的载体：实时后端不可用时，
+# 这里返回 degraded=True 而非抛异常，UI 与合成层据此提示「实时数据暂不可用」。
 # --------------------------------------------------------------------------- #
 class OrderStatusResponse(BaseModel):
     order_id: str | None = None
@@ -39,6 +45,9 @@ class OrderStatusResponse(BaseModel):
     carrier: str = ""
     eta: str = ""
     mock: bool = False
+    degraded: bool = False
+    error: str = ""
+    attempts: int = 0
     raw: dict = {}
 
 
@@ -47,6 +56,9 @@ class InventoryResponse(BaseModel):
     stock: int | None = None
     warehouse: str = ""
     mock: bool = False
+    degraded: bool = False
+    error: str = ""
+    attempts: int = 0
     raw: dict = {}
 
 
@@ -140,6 +152,8 @@ class APIAdapter(ABC):
         scheme: str = "bearer",
         auth_header: str = "Authorization",
         auth_query: str = "",
+        retry_policy: RetryPolicy | None = None,
+        sleep=None,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self.api_key = api_key
@@ -150,27 +164,67 @@ class APIAdapter(ABC):
         self.auth_header = auth_header
         self.auth_query = auth_query
         self.mock = True
+        # P0-2：每个适配器**独立**持有策略与熔断器——订单 API 挂掉不应连累库存查询
+        self.policy = retry_policy or RetryPolicy(timeout_s=float(timeout))
+        self._sleep = sleep                     # 可注入（测试免真等待），默认 time.sleep
         self._cache: dict[str, tuple[float, Any]] = {}
-
-    def _cached(self, key: str, fn):
-        now = time.time()
-        if key in self._cache and now - self._cache[key][0] < self.ttl:
-            return self._cache[key][1]
-        val = fn()
-        self._cache[key] = (now, val)
-        return val
+        self.stats = {"calls": 0, "retries": 0, "failures": 0,
+                      "degraded": 0, "short_circuited": 0}
 
     def _url(self, key: str) -> str:
         return self.base_url + self.path_tpl.format(id=key)
 
-    def _fetch(self, key: str) -> dict:
-        return self._cached(
-            key,
+    def _fetch(self, key: str) -> tuple[dict | None, dict]:
+        """取数：返回 `(数据, 元信息)`。**任何失败都不抛异常**，改为降级返回。
+
+        元信息：{"degraded", "cached", "attempts", "error", "short_circuited", "circuit"}。
+
+        注意：**失败不写缓存** —— 否则一次网络抖动会被 TTL 放大成持续 30s 的错误，
+        且掩盖熔断的快速失败效果。
+        """
+        now = time.time()
+        hit = self._cache.get(key)
+        if hit and now - hit[0] < self.ttl:
+            return hit[1], {"degraded": False, "cached": True, "attempts": 0,
+                            "circuit": self.policy.breaker_state()}
+
+        timeout = max(1, int(round(self.policy.timeout_s)))
+        attempt = self.policy.call(
             lambda: _http_get_json(
-                self._url(key), self.api_key, self.timeout,
+                self._url(key), self.api_key, timeout,
                 self.scheme, self.auth_header, self.auth_query,
             ),
+            sleep=self._sleep,
         )
+        self.stats["calls"] += 1
+        self.stats["retries"] += max(0, attempt.attempts - 1)
+
+        if attempt.ok:
+            self._cache[key] = (now, attempt.value)
+            return attempt.value, {"degraded": False, "cached": False,
+                                   "attempts": attempt.attempts,
+                                   "circuit": self.policy.breaker_state()}
+
+        self.stats["failures"] += 1
+        self.stats["degraded"] += 1
+        if attempt.short_circuited:
+            self.stats["short_circuited"] += 1
+        return None, {
+            "degraded": True, "cached": False, "attempts": attempt.attempts,
+            "error": attempt.error_text, "short_circuited": attempt.short_circuited,
+            "circuit": self.policy.breaker_state(),
+        }
+
+    def degraded_result(self, key: str | None, meta: dict) -> dict:
+        """把降级元信息落成统一的附加字段（子类在自己的 _degraded 里复用）。"""
+        return {
+            "degraded": True,
+            "error": meta.get("error", ""),
+            "attempts": int(meta.get("attempts", 0)),
+            "short_circuited": bool(meta.get("short_circuited")),
+            "circuit": meta.get("circuit", CIRCUIT_CLOSED),
+            "adapter": self.name,
+        }
 
     def enabled(self) -> bool:
         return bool(self.base_url) and not self.mock
@@ -188,11 +242,20 @@ class APIAdapter(ABC):
                     "note": "未配置 URL 或 KB_API_MOCK=1，处于模拟模式"}
         try:
             r = self.call(**{self.id_param: test_key})
+            # P0-2：降级不抛异常，所以这里必须显式判定——否则「取数失败」会被
+            # 误报成「自检通过」，用户按这个结论去排查只会更迷惑。
+            if r.get("degraded"):
+                return {"adapter": self.name, "mode": "live", "live": True, "ok": False,
+                        "url": self._url(test_key), "error": r.get("error", ""),
+                        "attempts": r.get("attempts", 0),
+                        "circuit": r.get("circuit", CIRCUIT_CLOSED),
+                        "short_circuited": bool(r.get("short_circuited"))}
             parsed = {k: r.get(k) for k in ("status", "stock", "carrier", "eta", "warehouse")}
             raw = r.get("raw", {}) or {}
             return {"adapter": self.name, "mode": "live", "live": True, "ok": True,
                     "url": self._url(test_key), "parsed": parsed,
                     "raw_preview": raw, "fields": _enum_paths(raw),
+                    "circuit": r.get("circuit", CIRCUIT_CLOSED),
                     "incomplete": all(v in (None, "") for v in parsed.values())}
         except Exception as e:  # noqa: BLE001
             return {"adapter": self.name, "mode": "live", "live": True, "ok": False,
@@ -216,12 +279,18 @@ class OrderStatusAdapter(APIAdapter):
     def call(self, order_id: str | None = None, **_kw) -> dict:
         if not self.enabled():
             return self._mock(order_id)
-        data = self._fetch(order_id or "?")
+        data, meta = self._fetch(order_id or "?")
+        if meta.get("degraded"):
+            return self._degraded(order_id, meta)
         return OrderStatusResponse(
             order_id=order_id, status=_get_path(data, self.f_status),
             carrier=_get_path(data, self.f_carrier) or "",
             eta=_get_path(data, self.f_eta) or "", raw=data,
         ).model_dump()
+
+    def _degraded(self, order_id, meta: dict) -> dict:
+        return {**OrderStatusResponse(order_id=order_id).model_dump(),
+                **self.degraded_result(order_id, meta)}
 
     def _mock(self, order_id):
         return OrderStatusResponse(
@@ -243,12 +312,18 @@ class InventoryAdapter(APIAdapter):
     def call(self, sku: str | None = None, **_kw) -> dict:
         if not self.enabled():
             return self._mock(sku)
-        data = self._fetch(sku or "?")
+        data, meta = self._fetch(sku or "?")
+        if meta.get("degraded"):
+            return self._degraded(sku, meta)
         raw_stock = _get_path(data, self.f_stock)
         return InventoryResponse(
             sku=sku, stock=int(raw_stock) if isinstance(raw_stock, (int, float)) else None,
             warehouse=_get_path(data, self.f_warehouse) or "", raw=data,
         ).model_dump()
+
+    def _degraded(self, sku, meta: dict) -> dict:
+        return {**InventoryResponse(sku=sku).model_dump(),
+                **self.degraded_result(sku, meta)}
 
     def _mock(self, sku):
         return InventoryResponse(
@@ -291,6 +366,34 @@ def _safe_int(raw, default: int, minimum: int | None = None) -> int:
     return v
 
 
+def _safe_float(raw, default: float, minimum: float | None = None) -> float:
+    """把配置值安全解析为 float（与 _safe_int 同理：非法值回落默认，不让服务崩）。"""
+    try:
+        v = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and v < minimum:
+        return default
+    return v
+
+
+def _policy_from_cfg(timeout: int) -> RetryPolicy:
+    """按运行时配置构造一份**新的**重试 / 熔断策略。
+
+    每个适配器独占一份：熔断是**按后端**的状态，订单 API 挂掉不该让库存查询
+    也跟着快速失败。
+    """
+    cb_on = str(get_cfg("KB_API_CIRCUIT_BREAKER", "1")).lower() in ("1", "true", "yes")
+    return RetryPolicy(
+        max_retries=_safe_int(get_cfg("KB_API_MAX_RETRIES", "2"), 2, minimum=0),
+        timeout_s=float(timeout),
+        backoff_s=_safe_float(get_cfg("KB_API_RETRY_BACKOFF", "0.5"), 0.5, minimum=0.0),
+        circuit_breaker=cb_on,
+        cb_threshold=_safe_int(get_cfg("KB_API_CIRCUIT_THRESHOLD", "5"), 5, minimum=1),
+        cb_cooldown_s=_safe_float(get_cfg("KB_API_CIRCUIT_COOLDOWN", "30"), 30.0, minimum=1.0),
+    )
+
+
 def build_registry() -> dict[str, APIAdapter]:
     """按运行时配置（页面写入，优先于环境变量）构建适配器注册表。"""
     mock = str(get_cfg("KB_API_MOCK", "1")).lower() in ("1", "true", "yes")
@@ -309,6 +412,7 @@ def build_registry() -> dict[str, APIAdapter]:
         field_carrier=get_cfg("KB_ORDER_CARRIER_PATH", "carrier"),
         field_eta=get_cfg("KB_ORDER_ETA_PATH", "eta"),
         timeout=timeout, ttl=ttl, scheme=scheme, auth_header=auth_header, auth_query=auth_query,
+        retry_policy=_policy_from_cfg(timeout),
     )
     inv = InventoryAdapter(
         base_url=get_cfg("KB_INVENTORY_API_URL", ""), api_key=api_key,
@@ -316,6 +420,7 @@ def build_registry() -> dict[str, APIAdapter]:
         field_stock=get_cfg("KB_INVENTORY_STOCK_PATH", "stock"),
         field_warehouse=get_cfg("KB_INVENTORY_WAREHOUSE_PATH", "warehouse"),
         timeout=timeout, ttl=ttl, scheme=scheme, auth_header=auth_header, auth_query=auth_query,
+        retry_policy=_policy_from_cfg(timeout),
     )
     for a in (order, inv):
         a.mock = mock or not a.base_url
@@ -344,11 +449,18 @@ def self_check() -> dict:
 
 
 def adapter_status() -> list[dict]:
-    """供 Web /api/status 展示每个适配器的真实/模拟状态。"""
+    """供 Web /api/status 展示每个适配器的真实/模拟状态与熔断状态。
+
+    熔断是「看不见的故障」：开路后调用全被快速失败，但没有可观测指标时
+    只能从「实时数据一直不可用」反推。故这里一并暴露 circuit 与降级计数。
+    """
     out = []
     for a in all_adapters():
         out.append({"name": a.name, "mode": "live" if a.enabled() else "mock",
-                    "base_url": a.base_url or "", "path_tpl": a.path_tpl})
+                    "base_url": a.base_url or "", "path_tpl": a.path_tpl,
+                    "circuit": a.policy.breaker_state(),
+                    "degraded_calls": a.stats.get("degraded", 0),
+                    "retries": a.stats.get("retries", 0)})
     return out
 
 
@@ -375,6 +487,17 @@ def normalize_live(live: list[dict] | None) -> list[dict]:
     """把适配器返回的原始实时数据归一化为前端友好的卡片结构（含 Pydantic 校验标记）。"""
     cards: list[dict] = []
     for l in live or []:
+        # P0-2 降级优先判定：降级的订单响应仍带着 order_id，若不先拦会被误判成
+        # 「订单卡片但状态为空」，用户看到的是「查不到」而不是「后端挂了」。
+        if l.get("degraded"):
+            cards.append({
+                "type": "degraded", "adapter": l.get("adapter", ""),
+                "error": l.get("error", ""), "attempts": int(l.get("attempts", 0)),
+                "circuit": l.get("circuit", CIRCUIT_CLOSED),
+                "short_circuited": bool(l.get("short_circuited")),
+                "order_id": l.get("order_id"), "sku": l.get("sku"),
+            })
+            continue
         if l.get("status") is not None or l.get("order_id"):
             cards.append({
                 "type": "order", "order_id": l.get("order_id"), "status": l.get("status"),

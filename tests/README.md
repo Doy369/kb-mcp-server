@@ -1,7 +1,7 @@
-# tests/ — 自动化测试（125 例，离线零服务依赖）
+# tests/ — 自动化测试（159 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 125 passed，本地约 11s
+python -m pytest tests/ -q      # 159 passed，本地约 11s
 ```
 
 不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
@@ -17,6 +17,7 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 | `test_retrieval.py` | 27 | BM25 分数越界回归护栏、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | 数字边界断言（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、降级链路、合成契约、14 工具注册完整性 |
+| `test_adapters_resilience.py` | 29 | 重试次数语义与指数退避封顶、熔断状态机（开路/半开/闭合、半开再失败重新计时）、开路期零调用、降级不抛异常、失败不写缓存、降级卡片在归一化/模板/LLM 提示词三处不 KeyError |
 
 ## CI 为什么跑 dev 而不跑 bge
 

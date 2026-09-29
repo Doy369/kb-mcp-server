@@ -12,13 +12,14 @@
 - P1-5 护栏 / 答案闸门      → Guardrail（置信度真正用来拦截低质量答复）
 - P1-5 评估 / 回归          → Evaluator + load_golden（golden 集 + 指标）
 - P2-9 动作型工具           → ActionTool（区别于检索型工具，agent 可"执行动作"）
-- P0-2 适配器重试 / 熔断     → RetryPolicy
+- P0-2 适配器重试 / 熔断     → RetryPolicy + CircuitBreaker（**已落地**，由 adapters 接入）
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -278,11 +279,141 @@ def action_registry() -> ActionToolRegistry:
 
 
 # ---------------------------------------------------------------------------
-# P0-2 实时适配器重试 / 熔断策略（预留给真实接入）
+# P0-2 实时适配器韧性：重试 / 指数退避 / 熔断 / 降级
+#
+# 为什么需要：外部后端不可用时，早先的行为是**异常直接抛穿**整条问答链路；
+# 或者被下游 try/except 吞掉，变成「实时数据静默消失」。两者都不可接受——
+# 前者让一次网络抖动毁掉整次答复，后者让用户以为「本来就没有实时数据」。
+# 现在的语义：有限重试 → 仍失败则**降级**返回带 degraded 标记的结构化结果，
+# 调用方可展示「实时查询暂不可用」，主链路不崩。
 # ---------------------------------------------------------------------------
+CIRCUIT_CLOSED = "closed"
+CIRCUIT_OPEN = "open"
+CIRCUIT_HALF_OPEN = "half_open"
+
+
+class CircuitOpenError(RuntimeError):
+    """熔断开路：本次**未发起**下游调用（快速失败）。"""
+
+
+@dataclass
+class CircuitBreaker:
+    """连续失败达阈值即开路；冷却后放行一次半开探测，成功则闭合。
+
+    开路期间**不再发起网络调用**，避免下游已挂时把上游线程也拖死
+    （实时 API 超时 5s，无熔断时每次问答都要白等重试）。
+    计时用 monotonic，避免系统时钟回拨导致冷却永久失效。
+    """
+
+    threshold: int = 5
+    cooldown_s: float = 30.0
+    failures: int = 0
+    opened_at: float | None = None
+
+    def state(self, now: float | None = None) -> str:
+        if self.opened_at is None:
+            return CIRCUIT_CLOSED
+        now = time.monotonic() if now is None else now
+        if now - self.opened_at >= self.cooldown_s:
+            return CIRCUIT_HALF_OPEN
+        return CIRCUIT_OPEN
+
+    def allow(self, now: float | None = None) -> bool:
+        """是否允许发起调用（仅开路期拒绝）。"""
+        return self.state(now) != CIRCUIT_OPEN
+
+    def record_success(self) -> None:
+        self.failures = 0
+        self.opened_at = None
+
+    def record_failure(self, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        self.failures += 1
+        if self.opened_at is not None:
+            self.opened_at = now            # 半开探测又失败 → 重新计时冷却
+        elif self.failures >= self.threshold:
+            self.opened_at = now
+
+
+@dataclass
+class Attempt:
+    """一次（含重试的）调用结果。ok=False 时 error 为最后一次异常。"""
+
+    ok: bool
+    value: Any = None
+    error: BaseException | None = None
+    attempts: int = 0
+    short_circuited: bool = False          # True：因熔断开路而根本没发起调用
+
+    @property
+    def error_text(self) -> str:
+        if self.error is None:
+            return ""
+        return f"{type(self.error).__name__}: {self.error}"
+
+
 @dataclass
 class RetryPolicy:
+    """重试 + 指数退避 + 可选熔断；由 `adapters.APIAdapter` 持有。
+
+    语义：`max_retries` 是**首次之外**的额外尝试次数，故最多调用 `max_retries + 1` 次。
+    退避 `delay_for(n) = min(backoff_s * 2^(n-1), max_backoff_s)`（n 从 1 起），
+    上限防止指数爆炸把一次问答拖成分钟级。
+    `timeout_s` 是**单次尝试**的超时，由 HTTP 层实际执行（本类不自行计时）。
+    """
+
     max_retries: int = 2
     timeout_s: float = 5.0
     backoff_s: float = 0.5
     circuit_breaker: bool = False
+    cb_threshold: int = 5
+    cb_cooldown_s: float = 30.0
+    max_backoff_s: float = 8.0
+
+    def __post_init__(self) -> None:
+        self.breaker: CircuitBreaker | None = (
+            CircuitBreaker(threshold=self.cb_threshold, cooldown_s=self.cb_cooldown_s)
+            if self.circuit_breaker else None
+        )
+
+    def breaker_state(self) -> str:
+        return self.breaker.state() if self.breaker is not None else CIRCUIT_CLOSED
+
+    def delay_for(self, attempt: int) -> float:
+        """第 attempt 次重试前的等待秒数（attempt 从 1 开始）。"""
+        if self.backoff_s <= 0 or attempt <= 0:
+            return 0.0
+        return min(self.backoff_s * (2 ** (attempt - 1)), self.max_backoff_s)
+
+    def call(self, fn, *, sleep=None) -> Attempt:
+        """执行 fn，按策略重试。**不抛异常**——失败信息放在 Attempt.error 里。
+
+        sleep 可注入（测试用），默认 time.sleep。
+        """
+        sleep = sleep or time.sleep
+        if self.breaker is not None and not self.breaker.allow():
+            return Attempt(ok=False, error=CircuitOpenError("熔断开路，跳过调用"),
+                           attempts=0, short_circuited=True)
+
+        last: BaseException | None = None
+        attempts = 0
+        for i in range(self.max_retries + 1):
+            attempts += 1
+            try:
+                value = fn()
+            except Exception as e:  # noqa: BLE001 —— 任何异常都可重试，降级由调用方决定
+                last = e
+                if self.breaker is not None:
+                    self.breaker.record_failure()
+                if i >= self.max_retries:
+                    break
+                # 重试途中若已开路，立即停止（不再等待退避，也不再打下游）
+                if self.breaker is not None and not self.breaker.allow():
+                    return Attempt(ok=False, error=last, attempts=attempts, short_circuited=True)
+                sleep(self.delay_for(i + 1))
+            else:
+                if self.breaker is not None:
+                    self.breaker.record_success()
+                return Attempt(ok=True, value=value, attempts=attempts)
+        return Attempt(ok=False, error=last, attempts=attempts)
+
