@@ -55,7 +55,8 @@
     构建镜像 → 启动容器 → 轮询 `/healthz` → 探 `/api/status` → 容器内依赖自检 → 容器内真实调 `/api/ask`。
     「镜像能构建、容器能跑」不再是假设，而是**每次提交自动验证的事实**。
     顺带修掉一个静默降级缺陷：容器原本缺 `rank-bm25` / `pypdf`，会让 BM25 混合召回**无声退化**为纯向量检索。
-  - ✅ **pgvector 生产存储已接入真实 Postgres 验证**（2026-09-29，CI 新增 `pg` job）：
+  - ✅ **pgvector 生产存储已在真实 Postgres 上跑通**（2026-09-29，CI 新增 `pg` job，
+    run `36530049484` 三 job 全绿）：
     用 service container 拉起 `pgvector/pgvector:pg16` → `setup_db.py --graph` 建表 →
     **完整回归评测（`eval_run.py`）读写全部落在 PG** → 独立脚本校验
     「vector 扩展 / `kb_chunks` 表 / HNSW 索引 / `vector(1024)` 维度」与「`kb_chunks` 非空」。
@@ -327,13 +328,15 @@
 **已完成的历史首步**（保留供追溯）：
 1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
 2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
-3. ~~P2-10 测试 + CI~~：119 例单测 + Actions 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+3. ~~P2-10 测试 + CI~~：130 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+4. ~~P0-3 Path B（pgvector 生产存储）~~ → **✅ 已完成（2026-09-29）**：
+   已在真实 PG 上跑通，并抓出/修掉 3 个只有真库才暴露的缺陷（见 P0-3 小节）。
 
 **下一批候选**：
 | 序 | 事项 | 投入 | 为什么现在做 |
 |---|---|---|---|
 | ~~1~~ | ~~验证 `docker build`~~ | — | **✅ 已完成（2026-09-29）**：已并入 CI `docker` job，构建+启动+冒烟全绿 |
-| ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
+| ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29，run 36530049484 全绿）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
 | 1 | **P0-2：适配器重试 / 熔断 / 降级** | 中 | `RetryPolicy` 空壳已就位，`adapters.py` 已有 timeout + TTL + 鉴权，**只差重试与熔断**；这是「能不能接真实后端」的门槛 |
 | 2 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
 | 3 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
