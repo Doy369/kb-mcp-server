@@ -223,6 +223,11 @@ def multi_agent_ask(question: str, top_k: int = 5, order_id: str | None = None,
 
     模式由 KB_AGENT_MODE 决定：deterministic（默认，零 LLM，离线可跑）| llm（本地 LLM 路由，
     失败自动回退 deterministic）。
+
+    P1-4 动态协作（可选，默认关闭）：KB_AGENT_PLANNER=llm 时由 LLM 动态分解分工
+    （失败回退确定性）；KB_AGENT_MAX_ROUNDS>1 时 worker 产出后由证据协商补查缺口；
+    KB_AGENT_HITL=1 时护栏判定「需人工复核」的答复标记 pending_human。
+    协作轨迹见返回的 collaboration 段（每轮分工 / 协商结论）。
     """
     from kb_mcp_server.agents import get_orchestrator
 
@@ -232,11 +237,12 @@ def multi_agent_ask(question: str, top_k: int = 5, order_id: str | None = None,
 
 @mcp.tool()
 def agent_status() -> dict:
-    """列出多 agent 协作层的 agent 清单与当前编排模式。"""
+    """列出多 agent 协作层的 agent 清单（含能力标签）、当前编排模式与规划器。"""
     from kb_mcp_server.agents import get_orchestrator
 
     o = get_orchestrator()
-    return {"mode": o.mode, "agents": o.agents_status()}
+    return {"mode": o.mode, "agents": o.agents_status(),
+            "roster": o.roster(), "planner": type(o.planner).__name__}
 
 
 if __name__ == "__main__":

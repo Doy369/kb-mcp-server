@@ -24,7 +24,7 @@
 - **实时数据接入韧性（P0-2）**：订单 / 库存适配器统一支持**重试（指数退避）+ 熔断
   （按后端独立，开路期不发调用）+ 降级**——后端不可用时返回 `degraded` 卡片并在答复中
   写明「实时数据暂不可用」，问答主链路不中断；`/api/status` 暴露熔断状态与降级计数。
-- **质量保障（P2-10）**：**159 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
+- **质量保障（P2-10）**：**207 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据。
@@ -99,7 +99,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（159 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（207 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
 │   └── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
@@ -297,6 +297,29 @@ python demo_graph.py
 | `deterministic`（默认） | 固定流水线，零 LLM 依赖 | 离线演示 / 生产兜底 |
 | `llm` | 本地 LLM 判断要不要查图 / 查实时数据，裁剪流水线 | LLM 可用时降低延迟；失败自动回退 deterministic |
 
+### 动态协作（P1-4）：按问题临时组队，而不是固定全跑
+
+三个可选开关，**默认全关时行为与旧版固定流水线完全一致**：
+
+| 配置 | 默认 | 作用 |
+|---|---|---|
+| `KB_AGENT_PLANNER` | 跟随 `KB_AGENT_MODE`（llm 模式 → `llm`） | `llm` 时由 LLM 把问题**动态分解**为子任务、从能力清单里选人；LLM 不可达 / 输出非法一律回退确定性规划 |
+| `KB_AGENT_MAX_ROUNDS` | `1` | `>1` 启用**证据协商**：worker 产出后由 `EvidenceCritic` 评估证据缺口，点名补查缺失能力的 agent（只提未执行过的能力，必然收敛） |
+| `KB_AGENT_HITL` | `0` | `1` 时护栏判定「需人工复核」的答复带 `pending_human=true`，供上层挂起等待人工放行 |
+
+协作过程落在返回的 `collaboration` 段（每轮分工 / 子任务理由 / 协商结论），例如：
+
+```
+规划器=llm  轮次=2  协商=True
+  第1轮 [llm] Retriever          → 协商[需补轮] 缺: ['live']
+      · Retriever（retrieval）：纯知识问答，只需语义检索
+  第2轮 [negotiation] LiveData
+```
+
+设计取舍：**LLM 只用在「任务分解」上**（这一步真的需要语义理解），
+「证据够不够」这类判定用确定性规则——可解释、零额外 token、离线可测。
+两条降级路径都保证「开启协作不会比不开更脆弱」。
+
 ### 轨迹即可观测性
 
 `multi_agent_ask` 的返回里带 `agents.trace`——每个 agent 的名称、耗时、成败、一句话摘要：
@@ -312,7 +335,8 @@ python demo_graph.py
 ### 自检
 
 ```bash
-python demo_agents.py
+python demo_agents.py                  # 固定流水线协作（只入向量库 → 自动补图 → 三路召回 → 合成）
+python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 协商补轮 / 降级 / 人工介入
 ```
 
 完整演示「知识只入向量库 → GraphBuilder 自动补图 → 三路并行召回 → 合成 → 第二轮秒回」。
@@ -429,7 +453,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 119 例，离线约 11s
+python -m pytest tests/ -v      # 207 例，离线约 11s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：

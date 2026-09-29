@@ -317,7 +317,9 @@
         <div class="doclist" id="agentList" style="max-height:300px" data-page-node-id="c63Dfy3sizLLr9QPOz3ZUz"><div class="empty" data-page-node-id="lOK2aKp7cCbAiq8ejxvYEv">加载中…</div></div>
         <div class="hint" style="margin-top:8px" data-page-node-id="Otf4W541Lgs3WL2IqpHwXN">
           编排：GraphBuilder（增量补图）→ [Retriever ∥ GraphReasoner ∥ LiveData] → Synthesizer。
-          模式由 KB_AGENT_MODE 决定（deterministic 零 LLM / llm 本地路由）。
+          模式由 KB_AGENT_MODE 决定（deterministic 零 LLM / llm 本地路由）；
+          P1-4 动态协作：KB_AGENT_PLANNER（deterministic / llm 动态任务分解）、
+          KB_AGENT_MAX_ROUNDS（&gt;1 启用证据协商补轮）、KB_AGENT_HITL（人工介入）。
         </div>
       </div>
       <div data-page-node-id="i3uErZPipyp1Dh1Fg4bQVt">
@@ -1081,13 +1083,37 @@ async function aapi(path, body){
 }
 async function loadAgentStatus(){
   const j = await aapi('/api/agent/status');
-  $('agentMode').textContent = '编排模式：' + (j.mode === 'llm' ? 'llm（本地路由）' : 'deterministic（固定流水线）');
-  const list = j.agents || [];
-  $('agentList').innerHTML = list.length ? list.map(a=>`<div class="docrow">
+  const extra = [];
+  if(j.max_rounds > 1) extra.push('多轮协商 ≤' + j.max_rounds + ' 轮');
+  if(j.hitl) extra.push('人工介入 开');
+  $('agentMode').textContent = '编排模式：' + (j.mode === 'llm' ? 'llm（本地路由）' : 'deterministic（固定流水线）')
+    + ' · 规划器：' + (j.planner || '–') + (extra.length ? ' · ' + extra.join(' · ') : '');
+  const list = (j.roster && j.roster.length) ? j.roster : (j.agents || []);
+  $('agentList').innerHTML = list.length ? list.map(a=>{
+    const caps = (a.capabilities || []).join(' / ');
+    return `<div class="docrow">
       <div class="meta"><div class="id">${esc(a.name)}</div>
-      <div class="pv">${esc(a.description||a.role||'')}</div></div>
-      <span class="badge">${esc(a.role||'')}</span></div>`).join('')
+      <div class="pv">${esc(a.description||a.role||'')}${caps?` · 能力：${esc(caps)}`:''}</div></div>
+      <span class="badge">${esc(a.role||'')}</span></div>`;
+  }).join('')
     : '<div class="empty">无 agent</div>';
+}
+function renderCollab(c){
+  if(!c || !c.rounds || !c.rounds.length) return '';
+  const rows = c.rounds.map(r=>{
+    const crit = r.critique;
+    const critTxt = crit ? (crit.need_more
+      ? `<span style="color:#c96a00">→ 证据缺口：${esc((crit.missing||[]).join('、'))}，请求补轮</span>`
+      : '<span style="color:var(--green,#2e9e5b)">→ 证据充分，收束</span>') : '';
+    const subs = (r.subtasks||[]).filter(s=>s.reason);
+    const subTxt = subs.length ? '<div class="src">' + subs.map(s=>esc(s.agent)+'：'+esc(s.reason)).join('<br>') + '</div>' : '';
+    return `<div class="docrow"><div class="meta">
+      <div class="id">第 ${r.round} 轮 · ${esc((r.agents||[]).join(' + '))}</div>
+      <div class="pv">${esc(r.reason||'')} ${critTxt}</div>${subTxt}</div>
+      <span class="badge">${esc(r.source||'')}</span></div>`;
+  }).join('');
+  return `<div class="hint" style="margin-top:8px">协作分工（规划器：${esc(c.planner||'–')}${c.negotiated?' · 发生协商补轮':''}）</div>
+    <div class="doclist" style="max-height:200px">${rows}</div>`;
 }
 function renderAgentTrace(trace){
   if(!trace || !trace.length) return '';
@@ -1124,15 +1150,20 @@ async function agentAsk(){
     ? `<span class="pill" style="background:#fff4e5;color:#c96a00;border:1px solid #f2c48d">⚠ 需人工复核</span>`
     : '';
   const grLine = (gr && !gr.passed) ? `<div class="src" style="color:#c96a00;margin-top:4px">护栏判定：${esc(gr.reason||'')}</div>` : '';
+  const hitlPill = j.pending_human
+    ? '<span class="pill" style="background:#eef4ff;color:#2b5fd9;border:1px solid #b9cdf7">⏸ 待人工放行</span>'
+    : '';
   $('agResult').innerHTML = `
     <div class="btext" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(j.answer||'(无答复)')}</div>
     ${paths.length ? '<div class="src" style="margin-top:8px">关系路径：<br>' + paths.map(p=>esc(p)).join('<br>') + '</div>' : ''}
     <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
-      <div class="hint">agent 轨迹（路由：${esc(routing.decision||'run_all')} · 总耗时 ${ag.total_ms||ms}ms）</div>
+      ${renderCollab(j.collaboration)}
+      <div class="hint" style="margin-top:8px">agent 轨迹（路由：${esc(routing.decision||'run_all')} · 总耗时 ${ag.total_ms||ms}ms）</div>
       ${renderAgentTrace(ag.trace)}
       <div class="meta" style="margin-top:8px">
         <span class="pill ${conf==='高'?'high':conf==='中'?'mid':'low'}">置信度 ${conf}</span>
         ${grPill}
+        ${hitlPill}
         <span class="pill">合成 ${esc(j.synthesis_method||'–')}</span>
         <span class="pill code">trace ${esc(j.trace_id||'')}</span>
         <span class="pill">${ms}ms</span>

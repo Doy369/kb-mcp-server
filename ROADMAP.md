@@ -1,15 +1,16 @@
 # 待解决优先级 · 上线路线图（ROADMAP）
 
-> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **50–55%**（2026-09-29 复核）。
-> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 119 例 + CI 真实跑通、
-> 语料对齐、规模化召回评测。
+> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **60–65%**（2026-09-29 复核）。
+> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 207 例 + CI 三 job 真实跑通、
+> 语料对齐、规模化召回评测、**多 agent 动态协作（任务分解 / 多轮协商 / 人工介入）**。
 > 本文件列出通往「真正上线的 B2B 多 agent 协作共同体」的待办，按优先级排序；
 > 每项标注了**已预留的拓展接口**（位于 `kb_mcp_server/extensions.py`），补做时直接实现接口并注册即可，无需改动编排/合成主链路。
 >
 > ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`ActionTool` / `ActionToolRegistry`、
 > `TenantProvider` —— 对应 P2-9 / P2-6，是「接口就位但功能未做」的准确标志。
-> （`Planner`、`AgentRegistry`、`Evaluator`、`ConfidenceGuardrail` 已真实接入；
-> `RetryPolicy` 已于 2026-09-29 由 `adapters` 真实接入，见 P0-2。）
+> （`Planner` / `AgentRegistry` 已于 2026-09-29 由 P1-4 真实接入——`Planner` 现有
+> `DeterministicPlanner` 与 `LLMPlanner` 两个实现；`Evaluator`、`ConfidenceGuardrail`、
+> `RetryPolicy` 亦已真实接入。）
 
 ---
 
@@ -105,10 +106,33 @@
 
 ## P1 — 让「多 agent」名副其实
 
-### P1-4 从静态 DAG 升级为可 emergent 的「共同体」
-- 现状：`Orchestrator` 是固定流水线 `GraphBuilder → [Retriever ∥ GraphReasoner ∥ LiveData] → Synthesizer`，llm 模式只是裁剪 agent；无 agent 间消息协商、动态分解、human-in-the-loop。
-- 待补：LLM 动态任务分解 / 多轮协商 / 人工介入；agent 按能力动态组队。
-- 接口：**`Planner`（已用 `DeterministicPlanner` 默认接入）／ `AgentRegistry`（agent 已自注册并打 `capabilities` 标签）**。
+### P1-4 从静态 DAG 升级为可 emergent 的「共同体」——**已完成（2026-09-29）**
+- ~~现状：`Orchestrator` 是固定流水线 `GraphBuilder → [Retriever ∥ GraphReasoner ∥ LiveData] → Synthesizer`，
+  llm 模式只是裁剪 agent；无 agent 间消息协商、动态分解、human-in-the-loop。~~
+- ✅ **已落地三件事**（均为可选开关，**默认全关时行为与旧版固定流水线完全一致**）：
+  1. **LLM 动态任务分解**（`KB_AGENT_PLANNER=llm`）：`LLMPlanner` 把问题分解为子任务，
+     从 `AgentRegistry` 的能力清单里选人（骨架 agent 不入候选），产出带理由的 `PlanResult`。
+     LLM 不可达 / 超时 / 抛异常 / 输出非法（无候选、全是幻觉 agent、JSON 解析失败）
+     **一律回退确定性规划**（`source=fallback`，并留 `reason` 与 `raw` 供排障）。
+  2. **多轮协商**（`KB_AGENT_MAX_ROUNDS>1`）：worker 产出后由 `EvidenceCritic` 按黑板现状
+     评估证据缺口（检索为空 / 缺图谱事实 / 有实时诉求却没实时数据），点名补查缺失能力的 agent。
+     **只提「尚未执行过」的能力** → 补轮必然收敛，同一 agent 绝不重复执行。
+     判定用确定性规则而非 LLM：可解释、零额外 token、离线可测。
+  3. **人工介入**（`KB_AGENT_HITL=1`）：护栏判定「需人工复核」时返回 `pending_human=true`
+     与 `human_review` 段，供上层挂起等待放行。
+- ✅ **可观测**：答复新增 `collaboration` 段（每轮分工 / 子任务理由 / 协商结论 / `negotiated`），
+  `/api/agent/status` 暴露能力清单与当前规划器；控制台「Agent 协作」面板按轮次渲染分工与协商结论。
+- ✅ **实测**（`scripts/verify_collaboration.py`：真实检索 + 真实合成，仅 LLM 换成可编程替身）：
+  | 场景 | 结果 |
+  |---|---|
+  | 单轮 + 动态分解 | 只叫 Retriever（而非固定三件套），1 轮 |
+  | 多轮协商 | 同样只叫 Retriever，critic 发现缺 `live` → 补轮叫 LiveData，实时数据进入答复 |
+  | LLM 输出非法 | 回退确定性全跑，链路不断 |
+  | 人工介入 | 护栏未过 → `pending_human=true`、`status=pending` |
+- 测试：`tests/test_planner_collaboration.py` **48 例**（离线零等待：LLM 用 stub、worker 用替身）。
+- 仍待补：**agent 间双向消息协商**（当前是「评审 → 补人」的单向补轮，非多轮对话协商）；
+  子任务依赖编排（`Subtask.depends_on` 已预留，当前各 worker 仍并行）。
+- 接口：**`Planner` / `AgentRegistry`（均已真实接入，不再是预留 seam）**。
 
 ### P1-5 评估与护栏（合规刚需）——**核心已落地（2026-09-07）**
 - ~~现状：仅 `trace_id` 基础留痕；无 golden 集/评测脚本、无幻觉抑制、置信度未真正拦截、无审计日志落盘。~~
@@ -160,9 +184,10 @@
 ### P2-10 自动化测试与 CI —— **已落地（2026-09-16）· CI 真实跑通（2026-09-29）**
 - ~~现状：零自动化测试（仅有离线自检脚本）。~~
 - **已落地**：
-  - **pytest 单测 119 例**（`tests/`，**11s** 跑完，离线零外部依赖）：
-    - `test_ingestion_storage.py`（32）：结构感知分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、
-      嵌入器单例、向量归一化、存储增删查与持久化、损坏文件容错、图谱本体约束、多格式解析。
+  - **pytest 单测 207 例**（`tests/`，**11s** 跑完，离线零外部依赖）：
+    - `test_ingestion_storage.py`（43）：结构感知分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、
+      嵌入器单例、向量归一化、存储增删查与持久化、损坏文件容错、图谱本体约束、多格式解析、
+      **PG 懒连接 / 注册时序 / 写库参数适配**（P0-3）。
     - `test_retrieval.py`（27）：**BM25 分数越界回归护栏**（守住 ROADMAP 记录的真 bug）、
       RRF 融合排序、MMR 去重、硬阈值与 BM25 强命中保留、分词、余弦边界。
     - `test_eval_guardrail.py`（36）：**数字边界断言**（守住「8 小时 被 48 小时蒙对」的假通过用例）、
@@ -170,6 +195,10 @@
     - `test_agents_mcp.py`（24）：Agent 模板方法异常兜底、AgentContext 黑板隔离、
       编排器 roster 与路由裁剪、**降级链路**（LLM 不可达回退模板 / 图谱不可用跳过）、
       合成输出契约、14 个 MCP 工具注册完整性。
+    - `test_adapters_resilience.py`（29）：**重试次数语义与指数退避封顶 / 熔断状态机 / 降级不抛异常 /
+      失败不写缓存**（P0-2）。
+    - `test_planner_collaboration.py`（48）：**动态任务分解的四条降级回退路径 / 协商只提未执行能力
+      （收敛）/ 多轮补轮不重复执行 / 默认单轮等价旧行为 / HITL 开关**（P1-4）。
   - **GitHub Actions CI**（`.github/workflows/ci.yml`）：单测 → 回归评测 → 基线校验，
     三段串行；通过率低于基线则 CI 变红**卡住合并**，评测报告作为 artifact 归档 30 天。
   - `pytest.ini` + `tests/conftest.py`：在导入任何模块前隔离 `KB_DATA_DIR` / store 路径 /
@@ -342,11 +371,13 @@
 **已完成的历史首步**（保留供追溯）：
 1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
 2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
-3. ~~P2-10 测试 + CI~~：159 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+3. ~~P2-10 测试 + CI~~：207 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
 4. ~~P0-3 Path B（pgvector 生产存储）~~ → **✅ 已完成（2026-09-29）**：
    已在真实 PG 上跑通，并抓出/修掉 3 个只有真库才暴露的缺陷（见 P0-3 小节）。
 5. ~~P0-2（重试 / 熔断 / 降级）~~ → **✅ 已完成（2026-09-29）**：
    `RetryPolicy` 不再是零引用空壳，外部后端不可用时整条问答链路平滑降级（见 P0-2 小节）。
+6. ~~P1-4（动态任务分解 / 多轮协商 / 人工介入）~~ → **✅ 已完成（2026-09-29）**：
+   `Planner` / `AgentRegistry` 不再只是预留 seam，多 agent 从固定 DAG 变为按问题临时组队（见 P1-4 小节）。
 
 **下一批候选**：
 | 序 | 事项 | 投入 | 为什么现在做 |
@@ -354,9 +385,10 @@
 | ~~1~~ | ~~验证 `docker build`~~ | — | **✅ 已完成（2026-09-29）**：已并入 CI `docker` job，构建+启动+冒烟全绿 |
 | ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29，run 36530049484 全绿）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
 | ~~1~~ | ~~P0-2：适配器重试 / 熔断 / 降级~~ | 中 | **✅ 已完成（2026-09-29）**：`RetryPolicy`/`CircuitBreaker` 已由 `adapters` 真实接入，重试+指数退避+按后端独立熔断+降级卡片全链路打通；29 例单测 |
-| 1 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
-| 2 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
-| 3 | **P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑** | 小 | CI 骨架已就位，加 job 即可 |
-| 4 | P0-2 收尾：接**真实** endpoint 联调 | 小 | 目前只实测了 mock 与「后端不可达」两种场景 |
+| ~~1~~ | ~~P1-4：LLM 动态任务分解~~ | 大 | **✅ 已完成（2026-09-29）**：动态分解 + 多轮协商 + 人工介入三件事落地，48 例单测，真实链路联调通过（见 P1-4 小节） |
+| 1 | **P2-9：接真实 MCP host + 动作型工具** | 大 | 决定「MCP」是标题还是实质；`ActionTool` / `ActionToolRegistry` 仍是零引用空壳 |
+| 2 | **P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑** | 小 | CI 骨架已就位，加 job 即可 |
+| 3 | P0-2 收尾：接**真实** endpoint 联调 | 小 | 目前只实测了 mock 与「后端不可达」两种场景 |
+| 4 | P1-4 收尾：agent 间双向消息协商 / 子任务依赖编排 | 中 | 当前是「评审 → 补人」的单向补轮；`Subtask.depends_on` 已预留 |
 
-> 做完 P1-4，完成度可到 **~65%**；再做完 P2-9，可到 **~75%**。
+> 做完 P2-9，完成度可到 **~75%**。

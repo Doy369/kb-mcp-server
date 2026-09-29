@@ -94,6 +94,9 @@ API_CONFIG_KEYS = [
     "KB_INVENTORY_WAREHOUSE_PATH", "KB_INVENTORY_TEST_SKU",
     "KB_LLM_ENABLED", "KB_LLM_PROVIDER", "KB_LLM_MODEL", "KB_LLM_BASE_URL", "KB_LLM_API_KEY",
     "KB_GUARDRAIL_MIN_CONFIDENCE",
+    # P1-4 动态协作：协作模式 / 规划器 / 多轮协商轮次 / 人工介入
+    "KB_AGENT_MODE", "KB_AGENT_PLANNER", "KB_AGENT_MAX_ROUNDS", "KB_AGENT_HITL",
+    "KB_AGENT_BUILD_GRAPH",
     "KB_CORS_ORIGINS", "KB_CORS_DEV_OPEN",
 ]
 _KEY_MASK = "***已设置***"
@@ -103,7 +106,8 @@ _MASKED_KEYS = ("KB_API_KEY", "KB_LLM_API_KEY")
 # 原因：配置值以字符串持久化，早期写入无校验，一旦落入 "abc" 这类非法值，
 # reload_adapters() 里 int() 会抛 ValueError → /api/config 恒 500 → 页面永远「保存失败」，
 # 且错误值已落盘，后续怎么改都救不回来（只能手改 runtime_config.json）。
-_INT_CFG_KEYS = ("KB_API_TIMEOUT", "KB_API_TTL", "KB_API_MAX_RETRIES", "KB_API_CIRCUIT_THRESHOLD")
+_INT_CFG_KEYS = ("KB_API_TIMEOUT", "KB_API_TTL", "KB_API_MAX_RETRIES",
+                 "KB_API_CIRCUIT_THRESHOLD", "KB_AGENT_MAX_ROUNDS")
 _FLOAT_CFG_KEYS = ("KB_GUARDRAIL_MIN_CONFIDENCE", "KB_API_RETRY_BACKOFF", "KB_API_CIRCUIT_COOLDOWN")
 
 
@@ -597,7 +601,19 @@ class Handler(BaseHTTPRequestHandler):
             from kb_mcp_server.agents import get_orchestrator
 
             o = get_orchestrator()
-            return 200, {"mode": o.mode, "agents": o.agents_status()}, None
+            try:
+                max_rounds = max(1, int(get_cfg("KB_AGENT_MAX_ROUNDS", "1") or 1))
+            except ValueError:
+                max_rounds = 1
+            return 200, {
+                "mode": o.mode,
+                "agents": o.agents_status(),
+                # P1-4：共同体成员的能力标签 + 当前规划器，便于核对「谁被叫来、为什么」
+                "roster": o.roster(),
+                "planner": type(o.planner).__name__,
+                "max_rounds": max_rounds,
+                "hitl": get_cfg("KB_AGENT_HITL", "0").lower() in ("1", "true", "yes"),
+            }, None
 
         if path == "/api/delete_doc":
             doc_id = payload.get("doc_id", "")

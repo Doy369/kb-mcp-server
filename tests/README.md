@@ -1,7 +1,7 @@
-# tests/ — 自动化测试（159 例，离线零服务依赖）
+# tests/ — 自动化测试（207 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 159 passed，本地约 11s
+python -m pytest tests/ -q      # 207 passed，本地约 11s
 ```
 
 不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
@@ -18,6 +18,7 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 | `test_eval_guardrail.py` | 36 | 数字边界断言（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、降级链路、合成契约、14 工具注册完整性 |
 | `test_adapters_resilience.py` | 29 | 重试次数语义与指数退避封顶、熔断状态机（开路/半开/闭合、半开再失败重新计时）、开路期零调用、降级不抛异常、失败不写缓存、降级卡片在归一化/模板/LLM 提示词三处不 KeyError |
+| `test_planner_collaboration.py` | 48 | P1-4 动态协作：LLM 任务分解（```json 包裹 / 前后噪声 / 幻觉 agent 丢弃 / capability 别名 / 骨架 agent 不入候选）、四条降级路径必回退且不抛异常、协商只提未执行能力（保证收敛）、多轮补轮不重复执行、默认单轮等价旧行为、HITL 开关与挂起、配置容错 |
 
 ## CI 为什么跑 dev 而不跑 bge
 
