@@ -1,8 +1,14 @@
 # 待解决优先级 · 上线路线图（ROADMAP）
 
-> 当前状态：**能跑的架构原型 / 离线 demo 级**，完成度约 20–25%。
+> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **40–45%**（2026-09-29 复核）。
+> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 119 例 + CI 真实跑通、
+> 语料对齐、规模化召回评测。
 > 本文件列出通往「真正上线的 B2B 多 agent 协作共同体」的待办，按优先级排序；
 > 每项标注了**已预留的拓展接口**（位于 `kb_mcp_server/extensions.py`），补做时直接实现接口并注册即可，无需改动编排/合成主链路。
+>
+> ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`RetryPolicy`、`ActionTool` / `ActionToolRegistry`、
+> `TenantProvider` —— 这三组对应 P0-2 / P2-9 / P2-6，是「接口就位但功能未做」的准确标志。
+> （`Planner`、`AgentRegistry`、`Evaluator`、`ConfidenceGuardrail` 已真实接入。）
 
 ---
 
@@ -30,15 +36,26 @@
 - 接口：**`Evaluator` / `load_golden()`**（已预留，P1-5）。
 
 ### P0-2 实时数据真实接入（订单/库存/CRM）
-- 现状：适配器真实 HTTP 路径已写，但 demo 强制 `KB_API_MOCK=1`；无重试/超时/鉴权/降级。
-- 待补：接真实 endpoint，加重试与熔断，调用失败降级到兜底答案。
-- 接口：**`RetryPolicy`**（已预留）。
+- 现状（**部分具备**，2026-09-29 逐项核实）：
+  - ✅ 已有：真实 HTTP 路径、**超时**（`KB_API_TIMEOUT`）、**TTL 缓存**（`KB_API_TTL`）、
+    **出站鉴权**（`KB_API_AUTH_SCHEME/HEADER/QUERY`，支持 bearer/header/query 三种）、
+    字段映射可配（`KB_ORDER_STATUS_PATH` 等）、非法数值容错解析。
+  - ❌ 缺失：**重试**、**熔断**、**失败降级到兜底答案**；demo 仍强制 `KB_API_MOCK=1`。
+- 待补：接真实 endpoint + 加重试（指数退避）+ 熔断 + 降级。
+- 接口：**`RetryPolicy`**（已定义 `max_retries` / `timeout_s` / `backoff_s` / `circuit_breaker`，
+  但**全仓库零引用**——这是本项未做的准确标志）。
 
 ### P0-3 生产级存储与向量真跑通
-- 现状（已推进一半）：**bge 真实嵌入已跑通**（`BAAI/bge-large-zh-v1.5`，1024 维，本地出域不泄露），
-  回归通过率 91% → **100%**；**规模化召回评测已完成**（见下方「规模化召回评测」小节，992 条公开语料）；
-  **pgvector + AGE 生产后端仍未起 PG**（Docker 拉镜像被网络挡住，暂缓）。
-- 待补：起 PG，跑 `setup_db.py --graph`，接 bge 嵌入验证生产存储路径（语义召回指标已在 numpy 矩阵下预演）。
+- 现状（**Path A 已完成，Path B 未开始**）：
+  - ✅ **bge 真实嵌入已跑通**（`BAAI/bge-large-zh-v1.5`，1024 维，本地出域不泄露），
+    回归通过率 91% → **100%**；**规模化召回评测已完成**（见下方「规模化召回评测」小节，992 条公开语料）。
+  - 🔶 **容器化三件套已就绪**（`Dockerfile` / `docker-compose.yml` / `.dockerignore` + `KB_DATA_DIR` 数据目录支持），
+    compose 含可选 `pgvector/pgvector:pg16` 服务；但**本机无 docker daemon，`docker build` 从未真正跑过**——
+    仅做过 `docker compose config --quiet` 语法校验。**「镜像能构建」仍是未验证假设。**
+  - ❌ **pgvector + AGE 生产后端仍未起 PG**。
+- 待补：① 在有 daemon 的机器上验证 `docker build`（这是当前最大的未验证假设）；
+  ② 起 PG，跑 `setup_db.py --graph`；③ 接 bge 嵌入验证生产存储路径（语义召回指标已在 numpy 矩阵下预演）；
+  ④ bge 改为**批量编码 + 向量持久化缓存**（当前纯 CPU 逐条编码 992 条需 826s，见性能代价一节）。
 - 接口：**`VectorStore` / `GraphStore` / `Embedder` 抽象已存在**，无需新增，直接接实现。
 
 ---
@@ -67,27 +84,40 @@
 ## P2 — 企业交付
 
 ### P2-6 多租户与权限
-- 现状：仅单 `api_token` Bearer，无租户隔离/RBAC/SSO。
+- 现状：仅单 `api_token` Bearer 鉴权 + 按 IP 限流，无租户隔离/RBAC/SSO。
 - 待补：租户上下文贯穿检索/图谱/实时数据；RBAC；SSO。
-- 接口：**`TenantProvider` / `TenantContext`（`AgentContext.tenant_id` 已预留）**。
+- 接口：**`TenantProvider` / `TenantContext`（`AgentContext.tenant_id` 已预留）**
+  —— `TenantProvider` **全仓库零引用**，仅有默认 `SingleTenantProvider` 类定义，本项未开始。
 
 ### P2-7 并发与部署
-- 现状：单进程 `ThreadingHTTPServer`，memory store 非进程安全；发布沙箱为单端口 demo。
-- 待补：队列/横向扩展/灰度；进程安全存储；真 infra 部署。
+- 现状：
+  - ✅ 已有：容器化三件套（`Dockerfile` 多阶段 + `docker-compose.yml` + `.dockerignore`）、
+    `KB_DATA_DIR` 外部化数据目录、`HEALTHCHECK` 探 `/healthz`、Bearer 鉴权、按 IP 限流、
+    结构化访问日志、`/api/metrics` 指标。
+  - ❌ 仍是**单进程 `ThreadingHTTPServer`**，memory store 非进程安全，无队列/横向扩展/灰度。
+- 待补：队列 / 横向扩展 / 灰度；进程安全存储；真 infra 部署（含验证 `docker build`，见 P0-3）。
 
 ### P2-8 知识抽取规模化
-- 现状：规则+LLM 抽取未在真实体量验证。
-- 待补：增量/去重/冲突消解/三元组人工审核。
+- 现状（**已推进一部分**）：
+  - ✅ **结构感知分块**（`chunk_structured`）已落地：标题作上下文前缀 / 「一行多档」自动拆条 / Q-A 成对合并，
+    可用 `KB_CHUNK_STRATEGY=plain` 回退旧长度切片；片段数 13 → 63。
+  - ✅ **规模化验证已做**：992 条公开语料召回评测（见下方小节），bge 语义 Recall@5 = 95.3%。
+  - ✅ **语料对齐已完成**：三份 SLA 文档零冲突（见「语料规范」）。
+  - ❌ 未做：**增量摄取**、**去重**、**冲突消解告警**、**三元组人工审核**。
+- 待补：承接「语料规范 · 后续建议」——摄取时加**冲突检测**（同档位出现不同数值时告警，不静默入库），
+  文档补**元数据**（版本 / 生效日期 / 适用客户等级），再做增量与三元组审核。
 
 ### P2-9 MCP 真落地 + 动作型工具
-- 现状：14 工具只活在 `server.py`，未接真实 MCP host；agent 只会检索不会执行动作。
-- 待补：接入真实 MCP host；实现「改单/退款/建工单」等动作。
-- 接口：**`ActionTool` / `ActionToolRegistry`（已预留，区别于检索型工具）**。
+- 现状：14 工具只活在 `kb_mcp_server/server.py`（FastMCP stdio 后端），**未接真实 MCP host**；
+  agent 只会检索不会执行动作（「改单 / 退款 / 建工单」全无）。
+- 待补：接入真实 MCP host；实现动作型工具。
+- 接口：**`ActionTool` / `ActionToolRegistry`（已预留，区别于检索型工具）
+  —— 两者均全仓库零引用**，本项未开始。
 
-### P2-10 自动化测试与 CI —— **已落地（2026-09-16）**
+### P2-10 自动化测试与 CI —— **已落地（2026-09-16）· CI 真实跑通（2026-09-29）**
 - ~~现状：零自动化测试（仅有离线自检脚本）。~~
 - **已落地**：
-  - **pytest 单测 119 例**（`tests/`，7.5s 跑完，离线零外部依赖）：
+  - **pytest 单测 119 例**（`tests/`，**11s** 跑完，离线零外部依赖）：
     - `test_ingestion_storage.py`（32）：结构感知分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、
       嵌入器单例、向量归一化、存储增删查与持久化、损坏文件容错、图谱本体约束、多格式解析。
     - `test_retrieval.py`（27）：**BM25 分数越界回归护栏**（守住 ROADMAP 记录的真 bug）、
@@ -101,10 +131,14 @@
     三段串行；通过率低于基线则 CI 变红**卡住合并**，评测报告作为 artifact 归档 30 天。
   - `pytest.ini` + `tests/conftest.py`：在导入任何模块前隔离 `KB_DATA_DIR` / store 路径 /
     审计开关，保证测试绝不碰真实数据，本地与 CI 结果一致。
-- **设计取舍（为何 CI 不跑 bge）**：dev 嵌入下实测 82%（P2 哨兵用例 FAIL），bge 下 100%；
-  CI 依赖 torch + 1.3GB 模型会让单次运行从 8s 涨到数分钟。因此
+- **设计取舍（为何 CI 不跑 bge）**：dev 嵌入下实测 **91%**（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
+  受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 100%。
+  CI 依赖 torch + 1.3GB 模型会让单次运行从 **11s** 涨到数分钟。因此
   **CI 保「快」与「不许变差」（0.72 阈值），bge 保「质量上限」（本地验证）**，职责分离。
   阈值贴着实测值会让 CI 噪音化进而被忽略，故留出余量。
+- **CI 首跑成功（2026-09-29，run id 36526951159）**：`ci.yml` 此前从未进过仓库（一直是未跟踪文件），
+  推送 `f43e331` 后触发 **CI #1**，7 步全绿（检出 → 配置 Python → 装依赖 → 单测 → 回归评测 → 校验基线 → 上传报告）。
+  同时验证了**本地复现方法与 GitHub 结果一致**，日后不必等 CI 即可自查。
 - **待补**：集成测试（起 app 打真实 HTTP 请求）、负载测试、bge 模式的独立 CI job。
 
 
@@ -258,8 +292,20 @@
 > 注意：当前指标只测「关键词是否出现 + 是否混入错误分块」，属必要条件，
 > 尚不足以度量答案自然度与完整性——需 P0-1 接 LLM 后再补语义级评测。
 
-## 建议的首步（投入产出比最高）
-1. **P1-5 + P0-1**（**已完成**）：`golden.jsonl` + `RegressionEvaluator` 已落地，基线已跑出。
-2. **P0-3 Path A（bge 嵌入）**（**已完成**）：bge 真实嵌入跑通，通过率 91% → 100%。
-3. **P0-3 Path B（pgvector + AGE）**：待网络恢复后起 PG，跑 `setup_db.py --graph`，验证生产存储路径。
-4. 做完这几步，完成度可到 ~45%。
+## 建议的下一步（按投入产出比排序 · 2026-09-29 复核）
+
+**已完成的历史首步**（保留供追溯）：
+1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
+2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
+3. ~~P2-10 测试 + CI~~：119 例单测 + Actions 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+
+**下一批候选**：
+| 序 | 事项 | 投入 | 为什么现在做 |
+|---|---|---|---|
+| 1 | **验证 `docker build`**（有 daemon 的机器） | 小 | 当前最大的「未验证假设」——镜像能不能构建完全没试过。若失败，Dockerfile 分层 ARG 的设计需要返工 |
+| 2 | **P0-3 Path B：起 PG + `setup_db.py --graph`** | 中 | 唯一还没走过的**生产存储路径**；且 bge 批量编码的性能问题要靠 pgvector 解决 |
+| 3 | **P0-2：适配器重试 / 熔断 / 降级** | 中 | `RetryPolicy` 空壳已就位，`adapters.py` 已有 timeout + TTL + 鉴权，**只差重试与熔断**；这是「能不能接真实后端」的门槛 |
+| 4 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
+| 5 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
+
+> 做完 1 + 2，完成度可到 **~55%**；再做完 3，可到 **~65%**。
