@@ -55,16 +55,22 @@
     构建镜像 → 启动容器 → 轮询 `/healthz` → 探 `/api/status` → 容器内依赖自检 → 容器内真实调 `/api/ask`。
     「镜像能构建、容器能跑」不再是假设，而是**每次提交自动验证的事实**。
     顺带修掉一个静默降级缺陷：容器原本缺 `rank-bm25` / `pypdf`，会让 BM25 混合召回**无声退化**为纯向量检索。
-  - ✅ **pgvector 生产存储已在真实 Postgres 上跑通**（2026-09-29，CI 新增 `pg` job）：
+  - ✅ **pgvector 生产存储已接入真实 Postgres 验证**（2026-09-29，CI 新增 `pg` job）：
     用 service container 拉起 `pgvector/pgvector:pg16` → `setup_db.py --graph` 建表 →
     **完整回归评测（`eval_run.py`）读写全部落在 PG** → 独立脚本校验
     「vector 扩展 / `kb_chunks` 表 / HNSW 索引 / `vector(1024)` 维度」与「`kb_chunks` 非空」。
     最后两步是关键：存储连不上时上层会走降级分支、**评测照样能过**（悄悄跑在 memory 上），
     故专门把「数据确实写进 PG」做成硬断言，堵掉静默退回。
-    同轮修掉一个潜伏 bug：`get_store()` 只构造实例不连接，而只有 `app.py` / `server.py`
-    记得显式 `connect()` —— 独立路径（`HybridRetriever()` 默认参数、`workers` 的
-    `get_store()`、`demo_*.py`）会拿到 `conn=None` 的实例一进方法就断言失败。
-    现改为 `PGVectorStore` 内部**懒连接 + 懒建表**（`_ready()`，幂等），任何入口都能安全用 PG 后端。
+    **首跑即抓出两个真缺陷**（这正是「在真实 PG 上跑一遍」的价值——此前全是未验证假设）：
+    ① **鸡生蛋**：`connect()` 里先 `register_vector()`，而 `CREATE EXTENSION vector`
+       在 `ensure_schema()` 才执行；pgvector 的 `register_vector` 在类型不存在时直接抛
+       `ProgrammingError('vector type not found in the database')`，故**全新库上连接阶段
+       必然失败**，生产库永远 bootstrap 不起来。修复：注册拆成 `_register()`，**晚于建扩展**。
+    ② **忘了连接**：`get_store()` 只构造实例不连接，而只有 `app.py` / `server.py` 记得
+       显式 `connect()`；独立路径（`HybridRetriever()` 默认参数、`workers` 的
+       `get_store()`、`demo_*.py`）拿到 `conn=None` 的实例，一进方法就断言失败。
+       修复：`PGVectorStore` 内部**懒连接 + 懒建表 + 懒注册**（`_ready()`，幂等）。
+    两个契约各有单测锁定（`TestPGVectorStoreLazyConnect`，6 例，不依赖真实 PG）。
   - ❌ **AGE 图侧仍未在真实 PG 验证**：CI 用的 pgvector 镜像不含 Apache AGE，
     `setup_db.py --graph` 的建图部分按设计降级为 memory 图（不阻断）。AGE 真跑需
     自建含 AGE 扩展的镜像或独立服务，列为后续小项。

@@ -39,9 +39,12 @@ jobs:
       - name: 安装依赖（仅离线必需项）
         run: |
           python -m pip install --upgrade pip
-          # 不装 sentence-transformers / psycopg / pgvector —— CI 保持快且零外部依赖。
-          # 这些只在 bge / pgvector 模式下才需要，由本地或专门的 job 验证。
-          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25
+          # 不装 sentence-transformers —— 1.3GB 模型 + torch 会让单次 CI 从 11s 涨到数分钟。
+          # 但仍要装 psycopg / pgvector 这两个**轻量客户端库**（无服务、无 torch，约 10MB）：
+          # 存储层的注册顺序（必须先 CREATE EXTENSION 再 register_vector）是曾经
+          # 真实踩坑的地方，装上真库才能让单测覆盖到真实代码路径而不是绕开导入。
+          # 真实 Postgres 的端到端验证由专门的 pg job 负责。
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 "psycopg[binary]" pgvector
 
       # ------------------------------------------------------------------ #
       # 1) 单测：分层覆盖数据 / 检索 / 评测 / 护栏 / Agent / 降级

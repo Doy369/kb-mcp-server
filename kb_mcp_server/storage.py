@@ -143,29 +143,45 @@ class PGVectorStore(VectorStore):
         self.dsn = dsn or get_settings().database_url
         self.conn = None
         self._schema_ready = False
+        self._registered = False
 
     def connect(self) -> None:
+        """仅建立连接，**不注册 vector 类型适配器**（原因见 _register）。"""
         if self.conn is not None:      # 幂等：重复调用不再新开连接（避免连接泄漏）
             return
         import psycopg
-        from pgvector.psycopg import register_vector
 
         self.conn = psycopg.connect(self.dsn, autocommit=True)
+
+    def _register(self) -> None:
+        """在 vector 扩展就绪**之后**再注册类型适配器。
+
+        顺序至关重要：pgvector 的 register_vector 会去查 pg_type，类型不存在时直接抛
+        `ProgrammingError('vector type not found in the database')`。若把它放进
+        connect()，则在**全新库**上扩展还没创建（CREATE EXTENSION 在 ensure_schema 里），
+        连接阶段就会失败 —— 鸡生蛋，生产库永远 bootstrap 不起来（CI 的 pg job 实测抓出）。
+        """
+        if self._registered:
+            return
+        from pgvector.psycopg import register_vector
+
         register_vector(self.conn)
+        self._registered = True
 
     def _ready(self):
-        """懒连接 + 懒建表；所有读写方法入口统一调用。
+        """懒连接 + 懒建表 + 懒注册；所有读写方法入口统一调用。
 
         背景：get_store() 只按配置构造实例，**不保证调用方记得 connect**。
         早先只有 app.py / server.py 显式 connect，而独立使用路径
         （HybridRetriever() / IngestionPipeline() 默认参数、workers 里的
         get_store()、demo_*.py）会拿到 conn=None 的实例，一进方法就断言失败。
-        把「连接 + 建表」收敛到方法内部，任何入口都能安全用 PG 后端。
+        把「连接 + 建表 + 注册适配器」收敛到方法内部，任何入口都能安全用 PG 后端。
         """
         if self.conn is None:
             self.connect()
         if not self._schema_ready:
             self.ensure_schema()
+        self._register()
         return self.conn
 
     def ensure_schema(self) -> None:
@@ -190,6 +206,7 @@ class PGVectorStore(VectorStore):
                 "ON kb_chunks USING hnsw (embedding vector_cosine_ops);"
             )
         self._schema_ready = True
+        self._register()
 
     def add_chunk(self, doc_id: str, content: str, embedding: list[float], meta: dict | None = None) -> None:
         self._ready()

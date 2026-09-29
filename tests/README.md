@@ -1,16 +1,19 @@
-# tests/ — 自动化测试（119 例，离线零依赖）
+# tests/ — 自动化测试（125 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 119 passed，本地约 11s
+python -m pytest tests/ -q      # 125 passed，本地约 11s
 ```
 
-全部零外部依赖：dev 嵌入 + memory 后端，不装 torch、不联网。
+不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
+CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量客户端库**
+（无服务、无 torch），以便单测覆盖存储层真实的类型注册路径；真实 Postgres 的
+端到端验证由 `pg` job 负责。
 
 ## 覆盖分层
 
 | 文件 | 例数 | 覆盖重点 |
 |---|---|---|
-| `test_ingestion_storage.py` | 32 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、图谱本体约束 |
+| `test_ingestion_storage.py` | 38 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、PG 懒连接与「注册晚于建扩展」时序、图谱本体约束 |
 | `test_retrieval.py` | 27 | BM25 分数越界回归护栏、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | 数字边界断言（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、降级链路、合成契约、14 工具注册完整性 |

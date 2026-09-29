@@ -207,18 +207,38 @@ class TestMemoryVectorStore:
 # PG 存储的懒连接契约
 # --------------------------------------------------------------------------- #
 class TestPGVectorStoreLazyConnect:
-    """PGVectorStore 必须在首次使用时自动连接 + 建表。
+    """PGVectorStore 的懒连接 + 注册顺序契约（不依赖真实 PG，纯单元）。
 
-    回归背景：get_store() 只按配置构造实例，**不负责连接**。早先只有
-    app.py / server.py 显式 connect，独立使用路径（HybridRetriever() 默认参数、
-    workers 里的 get_store()、demo_*.py）拿到的是 conn=None 的实例，一进方法就
-    断言失败——设了 KB_STORAGE_BACKEND=pgvector 反而直接崩。本组用例锁住
-    「任何入口都能安全用 PG 后端」这一契约（不依赖真实 PG，纯单元）。
+    两条契约都来自 CI 的 pg job 实测踩坑：
+
+    ① **懒连接**：get_store() 只按配置构造实例，**不负责连接**。早先只有
+       app.py / server.py 显式 connect，独立使用路径（HybridRetriever() 默认参数、
+       workers 里的 get_store()、demo_*.py）拿到的是 conn=None 的实例，一进方法就
+       断言失败——设了 KB_STORAGE_BACKEND=pgvector 反而直接崩。
+    ② **注册晚于建扩展**：pgvector 的 register_vector 查不到 vector 类型时会抛
+       ProgrammingError('vector type not found in the database')。若在 connect() 里
+       就注册，则在**全新库**上扩展还没 CREATE EXTENSION，连接阶段即失败——鸡生蛋，
+       生产库永远 bootstrap 不起来。
     """
 
     DSN = "postgresql://kb:kb@localhost:5432/kb"
 
+    class _Cur:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, *a, **k):
+            return None
+
+    class _Conn:
+        def cursor(self):
+            return TestPGVectorStoreLazyConnect._Cur()
+
     def _store(self, monkeypatch):
+        """构造一个「连接被替身接管、注册被旁路」的实例，专测连接时序。"""
         from kb_mcp_server import storage
 
         s = storage.PGVectorStore(dsn=self.DSN)
@@ -226,12 +246,13 @@ class TestPGVectorStoreLazyConnect:
 
         def fake_connect():
             calls["connect"] += 1
-            s.conn = object()          # 占位连接对象，本用例不做真实查询
+            s.conn = self._Conn()
 
         monkeypatch.setattr(s, "connect", fake_connect)
-        monkeypatch.setattr(s, "ensure_schema", lambda: setattr(s, "_schema_ready", True))
+        monkeypatch.setattr(s, "_register", lambda: None)   # 注册时序另有用例覆盖
         return s, calls
 
+    # ---- ① 懒连接 ----
     def test_first_use_connects_and_builds_schema(self, monkeypatch):
         s, calls = self._store(monkeypatch)
         assert s.conn is None, "构造时不应建立连接（连接是惰性的）"
@@ -247,17 +268,53 @@ class TestPGVectorStoreLazyConnect:
         assert calls["connect"] == 1
 
     def test_explicit_connect_skips_when_already_connected(self):
-        """conn 已存在时 connect() 立即返回。
-
-        验证方式：不安装 psycopg 也不该抛 ImportError——一旦 guard 失效，
-        connect() 会走进 import 逻辑并在此环境报错，用例即失败。
-        """
+        """conn 已存在时 connect() 立即返回（不重复开连接）。"""
         from kb_mcp_server import storage
 
         s = storage.PGVectorStore(dsn=self.DSN)
-        s.conn = object()
-        s.connect()                    # 有 guard 则直接 return
+        s.conn = self._Conn()
+        s.connect()
         assert s.conn is not None
+
+    # ---- ② 注册顺序 ----
+    def test_connect_must_not_register_vector(self, monkeypatch):
+        """connect() 阶段不得注册 vector 适配器（全新库上必然失败）。"""
+        registered: list = []
+        monkeypatch.setattr("pgvector.psycopg.register_vector", lambda c: registered.append(c))
+        monkeypatch.setattr("psycopg.connect", lambda dsn, **kw: self._Conn())
+
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        s.connect()
+        assert s.conn is not None
+        assert registered == [], "connect() 就注册了 vector 适配器——全新库会直接连不上"
+
+    def test_ensure_schema_registers_vector_once(self, monkeypatch):
+        """建扩展之后必须补注册适配器，且重复建表不重复注册。"""
+        registered: list = []
+        monkeypatch.setattr("pgvector.psycopg.register_vector", lambda c: registered.append(c))
+
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        s.conn = self._Conn()
+        s.ensure_schema()
+        assert len(registered) == 1, "建表后未注册 vector 适配器"
+        s.ensure_schema()
+        assert len(registered) == 1, "重复建表不应重复注册"
+
+    def test_ready_registers_after_schema(self, monkeypatch):
+        """经 _ready() 使用时，注册必须发生在连接/建表之后。"""
+        registered: list = []
+        monkeypatch.setattr("pgvector.psycopg.register_vector", lambda c: registered.append(c))
+        monkeypatch.setattr("psycopg.connect", lambda dsn, **kw: self._Conn())
+
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        s._ready()
+        assert registered, "经 _ready 使用时必须完成 vector 适配器注册"
 
 
 # --------------------------------------------------------------------------- #
