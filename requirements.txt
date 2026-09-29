@@ -11,4 +11,15 @@ python-dotenv
 # 生产嵌入（KB_EMBEDDING_BACKEND=bge 时启用，本地模型数据不出域）
 sentence-transformers
 
-# 离线/开发模式（memory 后端 + dev 嵌入器）零额外依赖，无需 numpy
+# 检索核心：BM25 混合召回（retrieval.py）
+# 缺失不会报错（retrieval.py 里是延迟导入 + try/except），但会**静默降级为纯向量检索**，
+# 使运行时行为与测试覆盖的行为不一致（test_retrieval.py 的 27 例正是测 BM25 融合）。
+# 生产与容器环境务必安装。
+rank-bm25
+numpy
+
+# 文档解析：PDF 摄取（ingestion.py 延迟导入；md/txt/docx 为零依赖实现）
+pypdf
+
+# 说明：memory 后端 + dev 嵌入器（离线/演示档）本可零额外依赖运行，
+# 但 BM25 静默降级会让检索质量悄悄变差，故列为标准依赖而非可选。
