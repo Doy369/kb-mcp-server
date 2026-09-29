@@ -18,6 +18,19 @@ from kb_mcp_server.embeddings import get_embedder
 from kb_mcp_server.config import get_cfg
 from kb_mcp_server.storage import VectorStore, get_store
 
+# BM25 依赖在**模块导入期**解析，而不是第一次检索时惰性导入。
+#
+# 为什么必须提到这里：惰性 `from rank_bm25 import BM25Okapi` 会连带导入 numpy，
+# 而这条路径第一次触发时往往发生在**请求处理线程**里。实测（Windows 子进程 +
+# 工作线程）该 DLL 首次加载会被拖到 60s 量级，表现为「第一次检索请求卡死」，
+# 而同样的调用在进程内只有 0.2s——定位成本极高。
+# 提前到导入期后：代价落在**服务启动**（可观测、可等待），请求路径上恒为热路径。
+# 未安装 rank-bm25 时保持原有降级：BM25 召回恒为空，纯向量检索照常工作。
+try:
+    from rank_bm25 import BM25Okapi
+except Exception:  # noqa: BLE001 - 可选依赖，缺失即退化，不影响主链路
+    BM25Okapi = None
+
 
 def _tokenize(text: str) -> list[str]:
     """中文按单字、英文/数字按词切分，适合 BM25 字面匹配。"""
@@ -58,10 +71,12 @@ class HybridRetriever:
             self._bm25 = None
             return
         corpus = [_tokenize(c["content"]) for c in chunks]
+        if BM25Okapi is None:
+            self._bm25 = None
+            return
         try:
-            from rank_bm25 import BM25Okapi
             self._bm25 = BM25Okapi(corpus)
-        except Exception:
+        except Exception:  # noqa: BLE001 - 构建失败同样退化，不拖垮检索
             self._bm25 = None
 
     def _bm25_search(self, query: str, top_n: int) -> list[dict]:

@@ -137,6 +137,50 @@ jobs:
         run: docker rm -f kb || true
 
   # ------------------------------------------------------------------ #
+  # 4) MCP 协议：真实 stdio 子进程 + 官方客户端完整握手
+  #
+  # 为什么需要这一步：此前的「MCP 工具」只被单测**直接 import 函数**调用——
+  # 那是函数测试，不是协议验证。「这个 server 能被真实 MCP 客户端连上、
+  # 握手、列出工具并调通」一直是未验证假设。本 job 起一个真实子进程，
+  # 用 ClientSession 走完整 JSON-RPC（initialize → list_tools → call_tool），
+  # 并验证 P2-9 动作工具确实产生了副作用（确认门 + 审计落盘）。
+  #
+  # 它同时回答一个定位问题：MCP 到底是标题还是实质——能不能被任意
+  # MCP host（Claude Desktop / 自研 agent）直接接入。
+  # ------------------------------------------------------------------ #
+  mcp:
+    name: MCP 协议（真实 stdio 端到端）
+    runs-on: ubuntu-latest
+
+    env:
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与单测 job 同口径）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: MCP 协议端到端自检（含动作工具确认门与审计）
+        run: python scripts/check_mcp.py
+
+  # ------------------------------------------------------------------ #
   # 3) 生产存储：真实 Postgres + pgvector
   #
   # 为什么需要这一步：pgvector 后端长期只做到「代码就位」——从未在真实 PG 上

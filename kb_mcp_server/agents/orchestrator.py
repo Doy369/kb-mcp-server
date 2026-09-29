@@ -13,6 +13,11 @@ P1-4 起支持三层「动态协作」（均为可选，默认关闭时行为与
    点名补查缺失能力的 agent 再跑一轮（受轮次上限约束，必然收敛）。
 3. **人工介入**（`KB_AGENT_HITL=1`）：护栏判定「需人工复核」时把答复标为 `pending_human`。
 
+P2-9 起接入**动作型工具**（`KB_AGENT_ACTIONS=1`，默认关闭）：
+4. `ActionAgent` 识别「退款 / 改单 / 建工单」等动作意图并真正执行；
+   不可逆动作（destructive）**不会被自动确认**，只停在待确认状态，并同样并入
+   `pending_human` 判定——「agent 能动手」与「动手必须有人负责」同时成立。
+
 轨迹（trace）：每次执行返回每个 agent 的耗时、成败、摘要，外加 `collaboration` 段
 （每轮分工 / 协商结论）——多 agent 的可观测性是硬要求，不然演示时说不清「谁干了什么」。
 """
@@ -26,6 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from kb_mcp_server.agents.base import AgentContext, AgentResult
 from kb_mcp_server.agents.workers import (
+    ActionAgent,
     GraphBuilderAgent,
     GraphReasonerAgent,
     LiveDataAgent,
@@ -39,6 +45,8 @@ from kb_mcp_server.extensions import (
     DeterministicPlanner,
     EvidenceCritic,
     LLMPlanner,
+    Subtask,
+    agent_gate_open,
 )
 
 # 可参与动态协作的 worker（骨架 agent 由编排器固定调度，不参与选人）
@@ -65,6 +73,11 @@ class Orchestrator:
         self.graph_reasoner = GraphReasonerAgent()
         self.live_data = LiveDataAgent()
         self.synthesizer = SynthesizerAgent()
+        # P2-9 动作执行者：**单独持有，不进 self.registry**。
+        # 理由：agents_status() / roster() 是被既有用例锁定的对外契约（5 个成员），
+        # 而动作执行者是否参与由 KB_AGENT_ACTIONS 决定，二者生命周期不同，
+        # 混进同一张表会让「共同体成员」随开关漂移，反而说不清。
+        self.action_agent = ActionAgent()
         # P1-4：本实例的「共同体成员表」。用私有 registry 而非全局单例——
         # 全局注册表是模块级的，多个 Orchestrator（含测试实例）并存会互相覆盖。
         self.registry = AgentRegistry([
@@ -106,6 +119,31 @@ class Orchestrator:
             card["capabilities"] = list(getattr(a, "capabilities", None) or [])
             out.append(card)
         return out
+
+    # ---- P2-9 动作层 ----
+    def actions_enabled(self) -> bool:
+        """动作型工具是否已开启（由 ActionAgent 自己声明的闸门键决定）。"""
+        return agent_gate_open(self.action_agent)
+
+    def actions_roster(self) -> dict:
+        """动作层能力清单：执行者 + 可用动作（含风险分级与参数契约）。
+
+        与 roster() 分开返回，避免把「有副作用的执行者」混进只读的 agent 清单里。
+        """
+        from kb_mcp_server.actions import read_action_log
+
+        card = self.action_agent.card()
+        card["capabilities"] = list(self.action_agent.capabilities)
+        card["gated_by"] = self.action_agent.gated_by
+        tools = []
+        try:
+            from kb_mcp_server.actions import action_tools
+
+            tools = action_tools().list()
+        except Exception:  # noqa: BLE001 - 动作层不可用不应影响状态端点
+            tools = []
+        return {"enabled": self.actions_enabled(), "agent": card, "tools": tools,
+                "recent": read_action_log(10)}
 
     # ---- llm 路由（可选；启用 LLM 动态分解时不再重复调用）----
     def _llm_route(self, ctx: AgentContext) -> dict | None:
@@ -184,6 +222,13 @@ class Orchestrator:
         executed: set[str] = set()
         rounds: list[dict] = []
         plan_res = self.planner.strategize(ctx)
+        # P2-9：动作执行者不在任何规划器的候选池里——它由开关控制，不由模型提名。
+        # 「谁有权动手」是治理问题，不能交给 LLM 决定；开启后在此显式补进本轮计划。
+        if self.actions_enabled() and self.action_agent not in plan_res.agents:
+            plan_res.agents.append(self.action_agent)
+            plan_res.subtasks.append(Subtask(
+                agent=self.action_agent.name, capability="action",
+                reason="已开启动作工具：识别到动作意图则执行（不可逆动作仅发起到待确认）"))
         pending = list(plan_res.agents)
         meta = {"source": plan_res.source, "reason": plan_res.reason,
                 "subtasks": plan_res.subtasks}
@@ -234,15 +279,29 @@ class Orchestrator:
             "executed": sorted(executed),
         }
 
+        # P2-9 动作结果（新增字段；未开启动作层时恒为空列表，保持向后兼容）
+        actions = list(ctx.actions or [])
+        pending_actions = [a for a in actions if a.get("status") == "needs_confirmation"]
+        out["actions"] = actions
+        out["pending_actions"] = pending_actions
+
         # P1-4 人工介入：护栏判定「需人工复核」时把答复挂起等待放行。
         # 默认关闭；开启后才写入 human_review / pending_human。
+        # P2-9：**存在待确认的不可逆动作**时同样必须进人工队列——
+        # 否则「agent 发起了退款」会静默通过，确认门就形同虚设。
         if get_cfg("KB_AGENT_HITL", "0").lower() in ("1", "true", "yes"):
             g = out.get("guardrail") or {}
-            need_review = g.get("passed") is False
+            need_review = g.get("passed") is False or bool(pending_actions)
+            reasons: list[str] = []
+            if g.get("passed") is False:
+                reasons.append(g.get("reason", ""))
+            if pending_actions:
+                reasons.append("存在待人工确认的不可逆动作：" + "、".join(
+                    str(a.get("action", "")) for a in pending_actions))
             out["human_review"] = {
                 "required": need_review,
                 "status": "pending" if need_review else "auto_approved",
-                "reason": (g.get("reason", "") if need_review else ""),
+                "reason": "；".join(r for r in reasons if r),
             }
             out["pending_human"] = need_review
 
@@ -265,6 +324,8 @@ class Orchestrator:
             "failed_agents": out["agents"]["failed"],
             "planner": out["collaboration"]["planner"],
             "rounds": len(rounds),
+            "actions": len(actions),
+            "pending_actions": len(pending_actions),
         })
         return out
 

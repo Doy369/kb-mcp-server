@@ -29,6 +29,13 @@ venv/
 # P1-5 审计日志（只追加，内容含问答记录，不入库）
 kb_audit.jsonl
 
+# P2-9 动作审计日志（只追加，内容含动作参数与业务结果，不入库）
+kb_actions.jsonl
+
+# P1-4 协作联调脚本的本地持久化产物（含摄取的知识内容，不入库）
+kb_store_collab.json
+kb_graph_collab.json
+
 # 规模化召回评测：嵌入缓存与中间产物（报告 bench_report_*.json 入库便于对比）
 bench_emb_*.npz
 *.tmp

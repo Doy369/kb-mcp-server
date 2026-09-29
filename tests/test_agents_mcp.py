@@ -271,6 +271,8 @@ class TestMcpTools:
             "graph_query", "graph_expand", "graph_paths", "graph_entities",
             "graph_stats", "graph_rebuild",
             "multi_agent_ask", "agent_status",
+            # P2-9 动作型工具（有副作用，独立于检索型工具）
+            "list_actions", "run_action",
         }
         assert expected <= names, f"缺失工具：{expected - names}"
 

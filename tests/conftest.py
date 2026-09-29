@@ -35,6 +35,7 @@ os.environ["KB_LLM_ENABLED"] = "0"
 os.environ["KB_AGENT_MODE"] = "deterministic"
 os.environ["KB_API_MOCK"] = "1"
 os.environ["KB_AUDIT_LOG"] = "off"          # 不污染审计文件
+os.environ["KB_ACTION_LOG"] = "off"         # P2-9 动作审计默认关闭；需要断言的用例自行开
 os.environ["KB_RATE_LIMIT"] = "0"
 os.environ["KB_API_TOKEN"] = ""
 

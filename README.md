@@ -24,10 +24,16 @@
 - **实时数据接入韧性（P0-2）**：订单 / 库存适配器统一支持**重试（指数退避）+ 熔断
   （按后端独立，开路期不发调用）+ 降级**——后端不可用时返回 `degraded` 卡片并在答复中
   写明「实时数据暂不可用」，问答主链路不中断；`/api/status` 暴露熔断状态与降级计数。
-- **质量保障（P2-10）**：**207 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
+- **多 agent 协作（P7 / P1-4）**：编排器调度多个职责 agent，按问题**动态组队**（LLM 任务分解）、
+  证据不足时**多轮协商补人**、需复核时**转人工队列**；全过程留可观测轨迹。
+- **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
+  按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
+  MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
+- **质量保障（P2-10）**：**260 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 四 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
-  ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据。
+  ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
+  ④ 真实 MCP 协议：stdio 子进程 + 客户端握手 → 工具调用 → 动作确认门与审计。
 - **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
   （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
 
@@ -80,12 +86,13 @@ kb-mcp-server/
 │   ├── llmclient.py        # 本地 LLM 客户端（代理绕过 + 60s 熔断，三处调用共用）
 │   ├── ingestion.py        # 摄取管线（切片 + 嵌入 + 写入，顺带抽取三元组入图）
 │   ├── retrieval.py        # 混合检索
-│   ├── synthesis.py        # 合成层（知识 + 图谱 + 实时数据 → 结构化答复）
+│   ├── synthesis.py        # 合成层（知识 + 图谱 + 实时数据 + 动作结果 → 结构化答复）
 │   ├── adapters.py         # 外部 API 适配器（订单/库存）
+│   ├── actions.py          # 动作型工具实现层（P2-9：ActionRunner 校验/确认门/审计 + 4 个动作）
 │   ├── agents/             # 多 agent 协作层（P7）
-│   │   ├── base.py         #   AgentContext 黑板 + BaseAgent 模板（计时/异常兜底）
-│   │   ├── workers.py      #   GraphBuilder / Retriever / GraphReasoner / LiveData / Synthesizer
-│   │   └── orchestrator.py #   编排器（deterministic / llm 路由，三路并行）
+│   │   ├── base.py         #   AgentContext 黑板 + BaseAgent 模板（计时/异常兜底/参与闸门）
+│   │   ├── workers.py      #   GraphBuilder / Retriever / GraphReasoner / LiveData / ActionAgent / Synthesizer
+│   │   └── orchestrator.py #   编排器（deterministic / llm 路由，多路并行 + 协商补轮 + HITL）
 │   └── __main__.py
 ├── app.py                  # Web 控制台（HTTP 服务 + 前端）
 ├── run_demo.py             # 演示入口（离线播种，用于云端/演示部署）
@@ -99,11 +106,13 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（207 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（260 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
-│   └── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
-├── .github/workflows/ci.yml  # CI 三 job：单测+评测+基线 / 容器构建+冒烟 / 真实 PG+pgvector
+│   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
+│   ├── check_mcp.py        # P2-9 真实 MCP 协议端到端（stdio 子进程 + 官方客户端）
+│   └── verify_collaboration.py  # P1-4 动态协作真实链路联调
+├── .github/workflows/ci.yml  # CI 四 job：单测+评测+基线 / 容器构建+冒烟 / 真实 PG+pgvector / MCP 协议
 ├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
 ├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
 ├── .dockerignore
@@ -184,8 +193,18 @@ python run_demo.py
 
 | 工具 | 说明 |
 |------|------|
-| `multi_agent_ask(question, top_k, order_id, sku, history)` | **多 agent 协作问答**：编排器调度 4 个职责 agent，答复附带每个 agent 的耗时/成败/摘要轨迹 |
-| `agent_status()` | agent 清单与当前编排模式 |
+| `multi_agent_ask(question, top_k, order_id, sku, history)` | **多 agent 协作问答**：编排器调度 5 个职责 agent，答复附带每个 agent 的耗时/成败/摘要轨迹 |
+| `agent_status()` | agent 清单、当前编排模式、规划器与动作层概况 |
+
+#### 动作型工具（P2-9）—— 与检索型工具的本质区别是**有副作用**
+
+| 工具 | 说明 |
+|------|------|
+| `list_actions()` | 列出可用动作（风险分级 / 是否需要确认 / 参数契约）+ 最近动作审计 |
+| `run_action(action, params, confirmed, actor)` | 执行动作（建工单 / 改单 / 退款 / 查工单）。**destructive 动作未 `confirmed=true` 一律不执行**，只回 `status=needs_confirmation` |
+
+风险分级：`read`（只读，如查工单）/ `write`（改业务数据，如建工单、改单）/ `destructive`（不可逆或涉及资金，如退款）。
+每次尝试（含被拒 / 待确认）都写动作审计（`KB_ACTION_LOG`，默认 `kb_actions.jsonl`）。
 
 ---
 
@@ -277,13 +296,13 @@ python demo_graph.py
                  ▼
                 GraphBuilder ──写入──▶ 知识图谱
                  │
-     ┌───────────┼───────────┐  （三个无依赖 worker 并行执行）
-     ▼           ▼           ▼
-  Retriever  GraphReasoner  LiveData      ← 各自只写黑板（AgentContext）里自己的字段
-  语义召回     图谱多跳       订单/库存
-     └───────────┼───────────┘
+     ┌───────────┼───────────┬───────────┐  （无依赖 worker 并行执行）
+     ▼           ▼           ▼           ▼
+  Retriever  GraphReasoner  LiveData   ActionAgent  ← 各自只写黑板（AgentContext）里自己的字段
+  语义召回     图谱多跳       订单/库存    动作执行（P2-9，默认关闭）
+     └───────────┼───────────┴───────────┘
                  ▼
-              Synthesizer ──▶ 结构化答复 + agent 轨迹
+              Synthesizer ──▶ 结构化答复 + agent 轨迹 + 动作结果
 ```
 
 - **按职责切，不按知识域切**（初期知识域太小，按域切会切出一堆空 agent）。
@@ -332,14 +351,40 @@ python demo_graph.py
 [OK] Synthesizer       1ms  合成完成（template，置信度高，5 条关系路径）
 ```
 
+### 动作型工具（P2-9）：从「只会答」到「能执行」
+
+编排层默认只检索不动作。开 `KB_AGENT_ACTIONS=1` 后多一个 `ActionAgent`，
+它识别「退款 / 改单 / 建工单」等动作意图并**真正执行**；有副作用，因此设三道闸：
+
+| 闸门 | 机制 |
+|---|---|
+| **参与闸门** | `ActionAgent.gated_by = KB_AGENT_ACTIONS`，默认关；`extensions.agent_gate_open` 保证未获准的 agent 连 LLM 动态组队的候选池都进不去——「谁有权动手」是治理问题，不交给模型决定 |
+| **意图闸门** | 只认规则能明确识别的动作意图，识别不出就什么都不做（宁可不做，不可乱做：猜错一次就是一次错误的退款） |
+| **确认闸门** | `ActionAgent` 的 `confirmed` **恒为 False**。destructive 动作只会停在 `needs_confirmation`，是否放行永远由人工 / HITL 决定 |
+
+**与 P1-4 闭环**：存在待确认动作时，若 `KB_AGENT_HITL=1`，答复一并标 `pending_human=true`
+（否则「agent 发起了退款」会静默通过，确认门形同虚设）。合成层新增【执行动作】段，
+三种终态——已执行 / 待确认 / 被拒——在答复与前端里都能一眼区分。
+
+三条安全底线收口在 `ActionRunner`（校验 → 确认门 → 执行 → 审计），新动作注册即自动获得：
+
+```
+$ python scripts/check_mcp.py     # 真实 stdio 子进程 + 官方 MCP 客户端
+  [OK] 未确认的退款被拦在待确认（未执行）
+  [OK] 待确认动作没有产生业务结果（确实没执行）
+  [OK] 确认后执行成功：RF-6552F732
+  [OK] list_tickets 能回读出前面建的工单（count=1）   ← 副作用真的落盘了
+```
+
 ### 自检
 
 ```bash
-python demo_agents.py                  # 固定流水线协作（只入向量库 → 自动补图 → 三路召回 → 合成）
+python demo_agents.py                  # 固定流水线协作（只入向量库 → 自动补图 → 多路召回 → 合成）
 python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 协商补轮 / 降级 / 人工介入
+python scripts/check_mcp.py            # P2-9 真实 MCP 协议端到端（握手 / 工具 / 动作确认门 / 审计 / 多 agent）
 ```
 
-完整演示「知识只入向量库 → GraphBuilder 自动补图 → 三路并行召回 → 合成 → 第二轮秒回」。
+完整演示「知识只入向量库 → GraphBuilder 自动补图 → 多路并行召回 → 合成 → 第二轮秒回」。
 LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，链路照常跑通。
 
 ---
@@ -358,6 +403,8 @@ LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，�
 | 合成 | `KB_LLM_ENABLED` / `KB_LLM_BASE_URL` / `KB_LLM_MODEL` | 本地 LLM（OpenAI 兼容，如 Ollama），失败自动回退模板 |
 | 实时 API | `KB_API_MOCK` / `KB_ORDER_API_URL` / `KB_INVENTORY_API_URL` / 字段路径 | `KB_API_MOCK=1` 走样例；配 URL 且 `=0` 走真实 HTTP |
 | 加固 | `KB_API_TOKEN` / `KB_RATE_LIMIT` / `KB_LOG_FILE` | Bearer 鉴权 / 每 IP 限流 / 结构化日志 |
+| 协作 | `KB_AGENT_MODE` / `KB_AGENT_PLANNER` / `KB_AGENT_MAX_ROUNDS` / `KB_AGENT_HITL` | 编排模式 / 动态任务分解 / 证据协商轮次 / 人工介入 |
+| 动作 | `KB_AGENT_ACTIONS` / `KB_ACTION_LOG` | 动作执行者是否参与编排（默认 `0`） / 动作审计日志路径（`off`=关闭） |
 
 > 页面「接口配置」提交的配置会持久化到 `runtime_config.json`，优先级高于 `.env`。
 
@@ -391,6 +438,8 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 | `KB_API_CIRCUIT_BREAKER` | `1` | 熔断开关；开路期不再发起调用 |
 | `KB_API_CIRCUIT_THRESHOLD` | `5` | 连续失败多少次后开路 |
 | `KB_API_CIRCUIT_COOLDOWN` | `30` | 开路冷却秒数，之后放半开探测 |
+| `KB_AGENT_ACTIONS` | `0` | `1` 时 ActionAgent 参与编排（不可逆动作仍只停在待确认） |
+| `KB_ACTION_LOG` | `kb_actions.jsonl` | 动作审计日志路径（`off`=不落盘） |
 
 镜像内置 `HEALTHCHECK` 探 `/healthz`（`docker compose ps` 可直接看健康状态）。
 需要 pgvector 时，`docker-compose.yml` 里已备好注释掉的 `pgvector/pgvector:pg16` 服务，取消注释即可。
@@ -453,7 +502,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 207 例，离线约 11s
+python -m pytest tests/ -v      # 260 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：

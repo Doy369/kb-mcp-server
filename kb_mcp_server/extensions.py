@@ -179,6 +179,23 @@ def agent_registry() -> AgentRegistry:
 _SKELETON_AGENTS = frozenset({"GraphBuilder", "Synthesizer"})
 
 
+def agent_gate_open(agent) -> bool:
+    """agent 是否已获准参与动态组队（P2-9）。
+
+    带副作用的 agent（ActionAgent 等）通过 `gated_by` 挂一个配置键；
+    键为假时**不进入候选池**，LLM 也就选不到它——「默认不动手」。
+    """
+    key = (getattr(agent, "gated_by", "") or "").strip()
+    if not key:
+        return True
+    try:
+        from kb_mcp_server.config import get_cfg
+
+        return (get_cfg(key, "0") or "").strip().lower() in ("1", "true", "yes", "on")
+    except Exception:  # noqa: BLE001 - 读配置失败按「未获准」处理，偏保守
+        return False
+
+
 def _extract_json(raw: str):
     """从 LLM 输出里抠出第一个 JSON 对象，容忍 ```json 包裹与前后闲聊。
 
@@ -236,9 +253,9 @@ class LLMPlanner(Planner):
                         timeout=self._timeout)
 
     def _candidates(self) -> list:
-        """可选 worker：注册表里除骨架以外的成员。"""
+        """可选 worker：注册表里除骨架、且已通过参与闸门的成员。"""
         return [a for a in self._registry_obj().all()
-                if getattr(a, "name", "") not in _SKELETON_AGENTS]
+                if getattr(a, "name", "") not in _SKELETON_AGENTS and agent_gate_open(a)]
 
     def _roster(self, cands) -> str:
         return "\n".join(
@@ -513,18 +530,67 @@ def load_golden(path: str) -> list[GoldenCase]:
 
 # ---------------------------------------------------------------------------
 # P2-9 动作型工具（区别于检索型工具：agent 可执行「改单 / 退款 / 建工单」等动作）
+#
+# 与检索型工具的本质区别是**有副作用**，因此接口比检索多三件东西：
+# 风险分级（risk）、参数契约（params）、是否需要确认（requires_confirm）。
+# 三者共同构成「执行前能拦住」的基础——默认实现见 kb_mcp_server/actions.py。
 # ---------------------------------------------------------------------------
+RISK_READ = "read"                  # 只读取，无副作用
+RISK_WRITE = "write"                # 产生 / 修改业务数据
+RISK_DESTRUCTIVE = "destructive"    # 不可逆或涉及资金，必须显式确认才执行
+
+
 class ActionTool(ABC):
     name: str = "action"
     description: str = ""
+    risk: str = RISK_WRITE
+    capabilities: list[str] = []
+    # None = 按 risk 推导（destructive 才需要确认）；显式赋值可覆盖
+    _requires_confirm: "bool | None" = None
 
     @abstractmethod
-    def execute(self, params: dict) -> dict: ...
+    def execute(self, params: dict) -> dict:
+        """执行动作并返回业务结果。
+
+        只管业务；参数校验 / 确认门 / 审计由 ActionRunner 统一在收口处做——
+        否则每新增一个动作工具就会漏掉一遍护栏。
+        失败请直接抛异常（Runner 会转成结构化失败并留痕）。
+        """
+
+    @property
+    def requires_confirm(self) -> bool:
+        if self._requires_confirm is not None:
+            return self._requires_confirm
+        return self.risk == RISK_DESTRUCTIVE
+
+    @property
+    def destructive(self) -> bool:
+        return self.risk == RISK_DESTRUCTIVE
+
+    def params(self) -> list[dict]:
+        """参数契约：[{name, type, required, desc}]，供校验与对外展示（MCP / 前端）。"""
+        return []
+
+    def required_params(self) -> list[str]:
+        return [p["name"] for p in self.params() if p.get("required")]
+
+    def schema(self) -> dict:
+        """动作的对外描述：清单、MCP 工具返回、前端面板共用同一份结构。"""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "risk": self.risk,
+            "requires_confirm": self.requires_confirm,
+            "capabilities": list(self.capabilities),
+            "params": self.params(),
+        }
 
 
 class ActionToolRegistry:
-    def __init__(self):
+    def __init__(self, tools=None):
         self._tools: dict[str, ActionTool] = {}
+        for t in (tools or []):
+            self.register(t)
 
     def register(self, t: ActionTool) -> ActionTool:
         self._tools[t.name] = t
@@ -533,8 +599,17 @@ class ActionToolRegistry:
     def get(self, name: str) -> ActionTool | None:
         return self._tools.get(name)
 
+    def all(self) -> list[ActionTool]:
+        return list(self._tools.values())
+
+    def names(self) -> list[str]:
+        return list(self._tools)
+
+    def by_capability(self, cap: str) -> list[ActionTool]:
+        return [t for t in self._tools.values() if cap in (t.capabilities or [])]
+
     def list(self) -> list[dict]:
-        return [{"name": t.name, "description": t.description} for t in self._tools.values()]
+        return [t.schema() for t in self._tools.values()]
 
 
 _ACTION_REGISTRY = ActionToolRegistry()

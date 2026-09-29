@@ -1,10 +1,11 @@
-"""四个职责 agent（P7）。编排器负责调度，各自只写 AgentContext 里自己的字段。
+"""五个职责 agent（P7 / P2-9）。编排器负责调度，各自只写 AgentContext 里自己的字段。
 
 - GraphBuilder  : 图谱构建（对未入图的存量文档补建三元组）
 - Retriever     : 语义侧召回（向量 + BM25 混合检索）
 - GraphReasoner : 关系侧召回（图谱多跳扩展，路径即证据）
-- Synthesizer   : 合成（知识 + 图谱 + 实时数据 → 结构化答复）
 - LiveData      : 实时数据（订单 / 库存适配器）
+- ActionAgent   : 动作执行（P2-9，识别动作意图 → 调动作工具，有副作用）
+- Synthesizer   : 合成（知识 + 图谱 + 实时数据 + 动作结果 → 结构化答复）
 """
 
 from __future__ import annotations
@@ -150,6 +151,56 @@ class LiveDataAgent(BaseAgent):
                            summary="无实时数据诉求")
 
 
+class ActionAgent(BaseAgent):
+    """执行者（P2-9）：把「用户想干什么」变成一次真实的动作调用。
+
+    与其它 worker 的**根本区别是它有副作用**，因此设三道闸，缺一不可：
+
+    1. **参与闸门**（`gated_by=KB_AGENT_ACTIONS`）——默认不进编排计划，
+       必须显式开启才可能被叫到（配合 `extensions.agent_gate_open`）；
+    2. **意图闸门**——只认规则能明确识别出的动作意图，识别不出就什么都不做。
+       「宁可不做，不可乱做」：猜错一次就是一次错误的退款；
+    3. **确认闸门**——`confirmed` 恒为 False。destructive 动作只会停在
+       `needs_confirmation`，是否放行永远由人工 / HITL 决定——
+       agent 自己确认自己的写操作，等于根本没有确认门。
+
+    动作的业务结果（含被拒 / 待确认）写进 `ctx.actions`，供合成层渲染与终态返回。
+    """
+
+    name = "ActionAgent"
+    role = "动作执行"
+    description = "识别退款/改单/建工单等动作意图并调用动作工具；不可逆动作只发起到「待确认」"
+    capabilities = ["action"]
+    gated_by = "KB_AGENT_ACTIONS"
+
+    def run(self, ctx: AgentContext) -> AgentResult:
+        from kb_mcp_server.actions import detect_intent, extract_params, run_action
+
+        action = detect_intent(ctx.question)
+        if not action:
+            return AgentResult(agent=self.name, role=self.role, ok=True,
+                               summary="无动作意图（未触发任何写操作）")
+
+        params = extract_params(action, ctx.question,
+                                order_id=ctx.order_id, sku=ctx.sku)
+        res = run_action(action, params, confirmed=False, actor="ActionAgent")
+        ctx.actions = list(ctx.actions or []) + [res]
+
+        status = res.get("status", "")
+        risk = res.get("risk", "")
+        if res.get("ok"):
+            summary = f"已执行动作 {action}（{risk}）"
+        elif status == "needs_confirmation":
+            summary = f"动作 {action} 待人工确认（{risk}，未执行）"
+        else:
+            summary = f"动作 {action} 被拒：{res.get('error', '')}"
+        # 业务被拒 / 待确认不算 agent 失败——agent 的职责（识别+发起）已正确完成。
+        return AgentResult(agent=self.name, role=self.role, ok=True, summary=summary,
+                           detail={"action": action, "status": status, "risk": risk,
+                                   "action_id": res.get("action_id", ""),
+                                   "confirmed": bool(res.get("confirmed"))})
+
+
 class SynthesizerAgent(BaseAgent):
     """合成者：把语义侧 + 关系侧 + 实时数据装配成结构化答复，结果写 ctx.answer。"""
 
@@ -162,11 +213,15 @@ class SynthesizerAgent(BaseAgent):
         from kb_mcp_server.synthesis import synthesize
 
         ctx.answer = synthesize(ctx.question, ctx.hits, ctx.live,
-                                history=ctx.history, graph_facts=ctx.graph_facts)
+                                history=ctx.history, graph_facts=ctx.graph_facts,
+                                actions=ctx.actions)
         method = ctx.answer.get("synthesis_method", "?")
         conf = ctx.answer.get("confidence", {})
         n_paths = len(ctx.answer.get("graph_paths", []))
+        n_act = len(ctx.answer.get("actions", []))
         extra = f"，{n_paths} 条关系路径" if n_paths else ""
+        if n_act:
+            extra += f"，{n_act} 项动作结果"
         return AgentResult(agent=self.name, role=self.role, ok=True,
                            summary=f"合成完成（{method}，置信度{conf.get('label', '?')}{extra}）",
                            detail={"method": method, "confidence": conf})

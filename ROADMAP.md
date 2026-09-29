@@ -1,16 +1,17 @@
 # 待解决优先级 · 上线路线图（ROADMAP）
 
-> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **60–65%**（2026-09-29 复核）。
-> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 207 例 + CI 三 job 真实跑通、
-> 语料对齐、规模化召回评测、**多 agent 动态协作（任务分解 / 多轮协商 / 人工介入）**。
+> 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **72–78%**（2026-09-29 复核）。
+> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 260 例 + CI 四 job 真实跑通、
+> 语料对齐、规模化召回评测、**多 agent 动态协作（任务分解 / 多轮协商 / 人工介入）**、
+> **动作型工具 + 真实 MCP 协议端到端（协议握手 / 工具调用 / 确认门 / 动作审计）**。
 > 本文件列出通往「真正上线的 B2B 多 agent 协作共同体」的待办，按优先级排序；
 > 每项标注了**已预留的拓展接口**（位于 `kb_mcp_server/extensions.py`），补做时直接实现接口并注册即可，无需改动编排/合成主链路。
 >
-> ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`ActionTool` / `ActionToolRegistry`、
-> `TenantProvider` —— 对应 P2-9 / P2-6，是「接口就位但功能未做」的准确标志。
-> （`Planner` / `AgentRegistry` 已于 2026-09-29 由 P1-4 真实接入——`Planner` 现有
-> `DeterministicPlanner` 与 `LLMPlanner` 两个实现；`Evaluator`、`ConfidenceGuardrail`、
-> `RetryPolicy` 亦已真实接入。）
+> ⚠️ **接口空壳清单（已定义但全仓库零引用）**：`TenantProvider` —— 对应 P2-6，
+> 是「接口就位但功能未做」的准确标志。
+> （`Planner` / `AgentRegistry` 已于 2026-09-29 由 P1-4 真实接入；`ActionTool` /
+> `ActionToolRegistry` 已于 2026-09-29 由 P2-9 真实接入（实现层 `kb_mcp_server/actions.py`）；
+> `Evaluator`、`ConfidenceGuardrail`、`RetryPolicy` 亦已真实接入。）
 
 ---
 
@@ -176,17 +177,51 @@
 - 待补：承接「语料规范 · 后续建议」——摄取时加**冲突检测**（同档位出现不同数值时告警，不静默入库），
   文档补**元数据**（版本 / 生效日期 / 适用客户等级），再做增量与三元组审核。
 
-### P2-9 MCP 真落地 + 动作型工具
-- 现状：14 工具只活在 `kb_mcp_server/server.py`（FastMCP stdio 后端），**未接真实 MCP host**；
+### P2-9 MCP 真落地 + 动作型工具 —— **已落地（2026-09-29）**
+- 原现状：14 工具只活在 `kb_mcp_server/server.py`（FastMCP stdio 后端），**未接真实 MCP host**；
   agent 只会检索不会执行动作（「改单 / 退款 / 建工单」全无）。
-- 待补：接入真实 MCP host；实现动作型工具。
-- 接口：**`ActionTool` / `ActionToolRegistry`（已预留，区别于检索型工具）
-  —— 两者均全仓库零引用**，本项未开始。
+- **✅ 已落地（2026-09-29，三件事一起做完）**：
+
+  **1) 动作型工具层**（`kb_mcp_server/actions.py` + `extensions.ActionTool/ActionToolRegistry`）
+  - 4 个动作：`create_ticket`（write，与 SLA 知识联动）、`update_order`（write）、
+    `request_refund`（**destructive**）、`list_tickets`（read）。
+  - **三条安全底线**收口在 `ActionRunner`（校验 → 确认门 → 执行 → 审计），
+    新动作注册即自动获得，不会漏：
+    1. **参数契约**——缺必填参数直接拒（`rejected` + `missing`），不把半成品请求发给下游；
+    2. **确认门**——destructive 动作未 `confirmed=true` **绝不执行**，只回
+       `needs_confirmation` 并回显待执行参数。**`ActionAgent` 的 `confirmed` 恒为 False**：
+       agent 自己确认自己的不可逆动作 = 没有确认门；
+    3. **审计落盘**——每次尝试（含被拒 / 待确认）写 `kb_actions.jsonl`（`KB_ACTION_LOG` 可配/可关）。
+       与问答审计分文件，合规可单独导出。**`list_tickets` 能回读刚建的工单**，
+       证明「副作用真的发生了」而不是只返回了个 id。
+  - 失败一律不抛异常，统一 `{ok,status,error}`（沿用全项目降级约定）。
+
+  **2) 真实 MCP 协议端到端**（`scripts/check_mcp.py` + CI `mcp` job）
+  - 此前「MCP 工具」只被单测**直接 import 函数**调用——那是函数测试，不是协议验证。
+    现在用官方 SDK 起**真实 stdio 子进程**，`ClientSession` 走完整 JSON-RPC：
+    `initialize → list_tools → call_tool`（16 个工具；检索 / 动作 / 多 agent 全链路），
+    22 项断言全绿。**MCP 从「标题」变成「可被任意 MCP host 直接接入的实质能力」。**
+  - 顺带修掉一个深坑：`rank_bm25`（连带 numpy）此前在**首次检索请求的工作线程里**惰性导入，
+    实测该路径 DLL 首次加载被拖到 60s 量级，表现为「第一次检索请求卡死」且极难定位
+    （同调用在进程内仅 0.2s）。已把可选重依赖提到 `retrieval.py` 模块导入期——
+    代价落在**可观测的服务启动**，请求路径恒为热路径。
+
+  **3) 接入编排 + Web + 前端**
+  - `ActionAgent`（`gated_by=KB_AGENT_ACTIONS`）：默认不进编排；开启后识别动作意图并执行。
+    新增 `extensions.agent_gate_open` 作为「有副作用的 agent 是否获准参与动态组队」的统一闸门。
+  - **与 P1-4 闭环**：存在 `needs_confirmation` 动作时，若 `KB_AGENT_HITL=1`，
+    答复一并标 `pending_human`（否则「agent 发起了退款」会静默通过）；
+    合成层新增【执行动作】段，三种终态（已执行 / 待确认 / 被拒）可一眼区分且对未知动作类型安全。
+  - MCP 工具 `list_actions` / `run_action`；Web `GET /api/actions`、`POST /api/action/run`；
+    `agent_status` 回带动作层；前端新增动作面板（清单 + 风险分级 + 手动执行 + 动作审计）。
+- 测试：`tests/test_actions.py` 53 例 + `tests/test_agents_mcp.py` 扩展工具清单；
+  基线不变（dev 嵌入 91%，10/11）。
+- 接口：~~`ActionTool` / `ActionToolRegistry`~~ → **已真实接入**，不再是零引用空壳。
 
 ### P2-10 自动化测试与 CI —— **已落地（2026-09-16）· CI 真实跑通（2026-09-29）**
 - ~~现状：零自动化测试（仅有离线自检脚本）。~~
 - **已落地**：
-  - **pytest 单测 207 例**（`tests/`，**11s** 跑完，离线零外部依赖）：
+  - **pytest 单测 260 例**（`tests/`，**约 12s** 跑完，离线零外部依赖）：
     - `test_ingestion_storage.py`（43）：结构感知分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、
       嵌入器单例、向量归一化、存储增删查与持久化、损坏文件容错、图谱本体约束、多格式解析、
       **PG 懒连接 / 注册时序 / 写库参数适配**（P0-3）。
@@ -196,13 +231,18 @@
       证据段剔除、禁止词反向断言、置信度护栏分级、审计日志线程安全与坏行容错。
     - `test_agents_mcp.py`（24）：Agent 模板方法异常兜底、AgentContext 黑板隔离、
       编排器 roster 与路由裁剪、**降级链路**（LLM 不可达回退模板 / 图谱不可用跳过）、
-      合成输出契约、14 个 MCP 工具注册完整性。
+      合成输出契约、16 个 MCP 工具注册完整性（P2-9 后新增 `list_actions` / `run_action`）。
     - `test_adapters_resilience.py`（29）：**重试次数语义与指数退避封顶 / 熔断状态机 / 降级不抛异常 /
       失败不写缓存**（P0-2）。
     - `test_planner_collaboration.py`（48）：**动态任务分解的四条降级回退路径 / 协商只提未执行能力
       （收敛）/ 多轮补轮不重复执行 / 默认单轮等价旧行为 / HITL 开关**（P1-4）。
+    - `test_actions.py`（53）：**参数契约 / 确认门（未确认的 destructive 绝不执行）/
+      审计三终态全留痕 / 意图识别与参数抽取（含「订单号里的数字不得被当成金额」回归）/
+      ActionAgent 三道闸 / 接入编排与 HITL 闭环 / 合成三终态渲染对未知动作安全**（P2-9）。
   - **GitHub Actions CI**（`.github/workflows/ci.yml`）：单测 → 回归评测 → 基线校验，
     三段串行；通过率低于基线则 CI 变红**卡住合并**，评测报告作为 artifact 归档 30 天。
+    另有三个独立 job：`docker`（镜像构建 + 容器冒烟）、`pg`（真实 PG + pgvector）、
+    `mcp`（真实 stdio 子进程 + 官方客户端协议端到端，P2-9）。
   - `pytest.ini` + `tests/conftest.py`：在导入任何模块前隔离 `KB_DATA_DIR` / store 路径 /
     审计开关，保证测试绝不碰真实数据，本地与 CI 结果一致。
 - **设计取舍（为何 CI 不跑 bge）**：dev 嵌入下实测 **91%**（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
@@ -373,13 +413,16 @@
 **已完成的历史首步**（保留供追溯）：
 1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
 2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
-3. ~~P2-10 测试 + CI~~：207 例单测 + Actions 三 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+3. ~~P2-10 测试 + CI~~：260 例单测 + Actions 四 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
 4. ~~P0-3 Path B（pgvector 生产存储）~~ → **✅ 已完成（2026-09-29）**：
    已在真实 PG 上跑通，并抓出/修掉 3 个只有真库才暴露的缺陷（见 P0-3 小节）。
 5. ~~P0-2（重试 / 熔断 / 降级）~~ → **✅ 已完成（2026-09-29）**：
    `RetryPolicy` 不再是零引用空壳，外部后端不可用时整条问答链路平滑降级（见 P0-2 小节）。
 6. ~~P1-4（动态任务分解 / 多轮协商 / 人工介入）~~ → **✅ 已完成（2026-09-29）**：
    `Planner` / `AgentRegistry` 不再只是预留 seam，多 agent 从固定 DAG 变为按问题临时组队（见 P1-4 小节）。
+7. ~~P2-9（接真实 MCP host + 动作型工具）~~ → **✅ 已完成（2026-09-29）**：
+   动作型工具（风险分级 / 参数契约 / 确认门 / 审计）+ 真实 MCP 协议端到端（CI `mcp` job）+
+   接入编排与 HITL 闭环 + Web/前端动作面板，53 例单测（见 P2-9 小节）。
 
 **下一批候选**：
 | 序 | 事项 | 投入 | 为什么现在做 |
@@ -388,9 +431,10 @@
 | ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29，run 36530049484 全绿）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
 | ~~1~~ | ~~P0-2：适配器重试 / 熔断 / 降级~~ | 中 | **✅ 已完成（2026-09-29）**：`RetryPolicy`/`CircuitBreaker` 已由 `adapters` 真实接入，重试+指数退避+按后端独立熔断+降级卡片全链路打通；29 例单测 |
 | ~~1~~ | ~~P1-4：LLM 动态任务分解~~ | 大 | **✅ 已完成（2026-09-29）**：动态分解 + 多轮协商 + 人工介入三件事落地，48 例单测，真实链路联调通过（见 P1-4 小节） |
-| 1 | **P2-9：接真实 MCP host + 动作型工具** | 大 | 决定「MCP」是标题还是实质；`ActionTool` / `ActionToolRegistry` 仍是零引用空壳 |
-| 2 | **P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑** | 小 | CI 骨架已就位，加 job 即可 |
-| 3 | P0-2 收尾：接**真实** endpoint 联调 | 小 | 目前只实测了 mock 与「后端不可达」两种场景 |
-| 4 | P1-4 收尾：agent 间双向消息协商 / 子任务依赖编排 | 中 | 当前是「评审 → 补人」的单向补轮；`Subtask.depends_on` 已预留 |
+| ~~1~~ | ~~P2-9：接真实 MCP host + 动作型工具~~ | 大 | **✅ 已完成（2026-09-29）**：动作型工具 + 真实 MCP 协议端到端 + 编排/HITL 闭环，53 例单测（见 P2-9 小节） |
+| 1 | **P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑** | 小 | CI 骨架已就位，加 job 即可 |
+| 2 | P0-2 收尾：接**真实** endpoint 联调 | 小 | 目前只实测了 mock 与「后端不可达」两种场景 |
+| 3 | P1-4 收尾：agent 间双向消息协商 / 子任务依赖编排 | 中 | 当前是「评审 → 补人」的单向补轮；`Subtask.depends_on` 已预留 |
+| 4 | P2-9 收尾：动作执行结果回写 GraphStore | 中 | 动作目前只落审计；把 `Ticket` 节点写回图谱，才能形成「执行 → 关系 → 再检索」闭环 |
 
-> 做完 P2-9，完成度可到 **~75%**。
+> P2-9 已完成，完成度已达 **~72–78%**；下一批做完可到 **~85%**。

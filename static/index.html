@@ -320,6 +320,8 @@
           模式由 KB_AGENT_MODE 决定（deterministic 零 LLM / llm 本地路由）；
           P1-4 动态协作：KB_AGENT_PLANNER（deterministic / llm 动态任务分解）、
           KB_AGENT_MAX_ROUNDS（&gt;1 启用证据协商补轮）、KB_AGENT_HITL（人工介入）。
+          P2-9 动作工具：KB_AGENT_ACTIONS=1 后 ActionAgent 参与编排（识别退款/改单/建工单意图），
+          不可逆动作一律只停在「待确认」。
         </div>
       </div>
       <div data-page-node-id="i3uErZPipyp1Dh1Fg4bQVt">
@@ -345,6 +347,33 @@
       <button class="ghost btn-sm" id="auditRefresh" data-page-node-id="xuBw8jfYau2BZTLeBCM9IG">刷新</button></h2>
     <div class="hint" style="margin-bottom:8px" data-page-node-id="UlAavu2rcigS3tbBMJSzbc">每条问答自动落一条审计记录（时间 / 问题 / 置信度 / 护栏判定 / 耗时），只追加不删改——B2B 合规刚需。最近 50 条：</div>
     <div class="doclist" id="auditList" style="max-height:260px" data-page-node-id="01mJTwkkYjU6HTE0Gd6GAI"><div class="empty" data-page-node-id="OFeUDXOrXPWAdqZL9RF50e">加载中…</div></div>
+
+    <!-- P2-9 动作型工具（有副作用，区别于检索工具）-->
+    <h2 style="margin-top:16px"><span class="dot"></span>动作工具（会真的动手，请谨慎） <span class="spacer"></span>
+      <button class="ghost btn-sm" id="actionRefresh">刷新</button></h2>
+    <div class="hint" style="margin-bottom:8px" id="actionMode">加载中…</div>
+    <div class="grid2">
+      <div>
+        <div class="hint" style="margin-bottom:6px">可用动作（含风险分级与参数契约）</div>
+        <div class="doclist" id="actionList" style="max-height:260px"><div class="empty">加载中…</div></div>
+      </div>
+      <div>
+        <div class="hint" style="margin-bottom:6px">手动执行（destructive 动作必须先勾选确认）</div>
+        <label>动作</label>
+        <select id="actName"></select>
+        <label style="margin-top:8px">参数（JSON）</label>
+        <textarea id="actParams" rows="4" placeholder='{"order_id":"SO123","amount":88,"reason":"物流超时"}'></textarea>
+        <div class="row" style="margin-top:8px">
+          <label style="margin:0;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" id="actConfirm" style="width:auto;margin:0" /> 我确认执行（不可逆动作必勾）
+          </label>
+          <button id="actRunBtn">执行</button>
+        </div>
+        <div class="result" id="actResult" style="margin-top:8px"><div class="empty">尚未执行任何动作。</div></div>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:10px;margin-bottom:6px">最近动作审计（含被拦下 / 被拒的尝试——这是「动作真的发生过」唯一可断言的证据）：</div>
+    <div class="doclist" id="actionLog" style="max-height:240px"><div class="empty">加载中…</div></div>
   </section>
 
   <!-- ============ 接口配置 ============ -->
@@ -823,7 +852,7 @@ document.querySelectorAll('.sidebar nav button').forEach(b=>{
     ['kb','search','config','graph','agents'].forEach(t=> $('tab-'+t).classList.toggle('hidden', t!==tab));
     if(tab==='config'){ loadConfig(); }
     if(tab==='graph'){ loadGraphStats(); loadGraphEntities(); graphNetEnsure(); }
-    if(tab==='agents'){ loadAgentStatus(); loadAudit(); }
+    if(tab==='agents'){ loadAgentStatus(); loadAudit(); loadActions(); }
   };
 });
 
@@ -1153,9 +1182,14 @@ async function agentAsk(){
   const hitlPill = j.pending_human
     ? '<span class="pill" style="background:#eef4ff;color:#2b5fd9;border:1px solid #b9cdf7">⏸ 待人工放行</span>'
     : '';
+  const pendActions = j.pending_actions || [];
+  const pendPill = pendActions.length
+    ? `<span class="pill" style="background:#fff4e5;color:#c96a00;border:1px solid #f2c48d">⚠ ${pendActions.length} 项不可逆动作待确认</span>`
+    : '';
   $('agResult').innerHTML = `
     <div class="btext" style="white-space:pre-wrap;font-size:13px;line-height:1.6">${esc(j.answer||'(无答复)')}</div>
     ${paths.length ? '<div class="src" style="margin-top:8px">关系路径：<br>' + paths.map(p=>esc(p)).join('<br>') + '</div>' : ''}
+    ${renderActions(j.actions)}
     <div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px">
       ${renderCollab(j.collaboration)}
       <div class="hint" style="margin-top:8px">agent 轨迹（路由：${esc(routing.decision||'run_all')} · 总耗时 ${ag.total_ms||ms}ms）</div>
@@ -1164,6 +1198,7 @@ async function agentAsk(){
         <span class="pill ${conf==='高'?'high':conf==='中'?'mid':'low'}">置信度 ${conf}</span>
         ${grPill}
         ${hitlPill}
+        ${pendPill}
         <span class="pill">合成 ${esc(j.synthesis_method||'–')}</span>
         <span class="pill code">trace ${esc(j.trace_id||'')}</span>
         <span class="pill">${ms}ms</span>
@@ -1193,6 +1228,107 @@ async function loadAudit(){
   }).join('');
 }
 $('auditRefresh').onclick = loadAudit;
+
+// ===== P2-9 动作型工具面板 =====
+const RISK_LABEL = {read:'只读', write:'写入', destructive:'不可逆'};
+const RISK_STYLE = {
+  read:'background:#eef4ff;color:#2b5fd9;border:1px solid #b9cdf7',
+  write:'background:var(--green-soft,#e8f6ee);color:var(--green,#2e9e5b)',
+  destructive:'background:#fff4e5;color:#c96a00;border:1px solid #f2c48d'
+};
+const ACT_STATUS = {executed:['已执行','var(--green,#2e9e5b)'], needs_confirmation:['待确认','#c96a00'], rejected:['已拒绝','#d33']};
+let _actionTools = [];
+
+// 动作结果渲染：executed / needs_confirmation / rejected 三种终态必须能一眼区分，
+// 否则「到底做没做」在界面上就说不清——这正是确认门要防的事。
+function renderActions(actions){
+  const as = actions || [];
+  if(!as.length) return '';
+  const rows = as.map(a=>{
+    const [label,color] = ACT_STATUS[a.status] || [a.status||'', 'var(--muted)'];
+    const body = a.result ? JSON.stringify(a.result) : (a.message || a.error || '');
+    return `<div class="docrow"><div class="meta">
+      <div class="id">${esc(a.action||'')} <span style="color:${color}">${esc(label)}</span></div>
+      <div class="pv">${esc(body).slice(0,180)}</div></div>
+      <span class="badge" style="${RISK_STYLE[a.risk]||''}">${esc(RISK_LABEL[a.risk]||a.risk||'')}</span></div>`;
+  }).join('');
+  return `<div class="hint" style="margin-top:8px">执行动作（有副作用，已全部留痕）</div>
+    <div class="doclist" style="max-height:200px">${rows}</div>`;
+}
+function renderActionTools(tools){
+  if(!tools || !tools.length){ $('actionList').innerHTML = '<div class="empty">无动作</div>'; return; }
+  $('actionList').innerHTML = tools.map(t=>{
+    const params = (t.params||[]).map(p=>`${p.name}${p.required?'*':''}:${p.type}`).join(', ');
+    return `<div class="docrow"><div class="meta">
+      <div class="id">${esc(t.name)}${t.requires_confirm?' <span style="color:#c96a00">需确认</span>':''}</div>
+      <div class="pv">${esc(t.description||'')}${params?` · 参数：${esc(params)}`:''}</div></div>
+      <span class="badge" style="${RISK_STYLE[t.risk]||''}">${esc(RISK_LABEL[t.risk]||t.risk||'')}</span></div>`;
+  }).join('');
+  const sel = $('actName');
+  const prev = sel.value;
+  sel.innerHTML = tools.map(t=>`<option value="${esc(t.name)}">${esc(t.name)}（${esc(RISK_LABEL[t.risk]||t.risk)}）</option>`).join('');
+  if(prev) sel.value = prev;
+  fillActionParams();
+}
+function fillActionParams(){
+  const t = _actionTools.find(x=>x.name === $('actName').value);
+  if(!t) return;
+  const sample = {};
+  for(const p of (t.params||[])){
+    if(!p.required) continue;
+    sample[p.name] = (p.type==='float'||p.type==='int') ? 0 : (p.name==='order_id' ? 'SO123' : '示例值');
+  }
+  $('actParams').value = JSON.stringify(sample);
+}
+function renderActionLog(recent){
+  const rs = recent || [];
+  if(!rs.length){ $('actionLog').innerHTML = '<div class="empty">暂无动作记录——执行一次后即可在此核对。</div>'; return; }
+  $('actionLog').innerHTML = rs.map(r=>{
+    const [label,color] = ACT_STATUS[r.status] || [r.status||'', 'var(--muted)'];
+    const body = r.result ? JSON.stringify(r.result) : (r.error||'');
+    return `<div class="docrow"><div class="meta">
+      <div class="id">${esc(r.action||'')} <span style="color:${color}">${esc(label)}</span></div>
+      <div class="pv">${esc(r.ts||'')} · ${esc(r.actor||'')} · 确认=${r.confirmed?'是':'否'} · ${esc(body).slice(0,160)}</div></div>
+      <span class="badge" style="${RISK_STYLE[r.risk]||''}">${esc(RISK_LABEL[r.risk]||r.risk||'')}</span></div>`;
+  }).join('');
+}
+async function loadActions(){
+  let j;
+  try{ j = await (await fetch(API('/api/actions'))).json(); }
+  catch(e){ $('actionList').innerHTML = '<div class="empty">加载失败：'+esc(String(e))+'</div>'; return; }
+  _actionTools = j.tools || [];
+  $('actionMode').textContent = '动作执行者：'
+    + (j.enabled ? '已开启（会参与多 agent 编排）' : '未开启（设 KB_AGENT_ACTIONS=1 后参与编排；下方手动执行始终可用）')
+    + ' · 可用动作 ' + _actionTools.length + ' 个';
+  renderActionTools(_actionTools);
+  renderActionLog(j.recent);
+}
+async function runActionOnce(){
+  const action = $('actName').value;
+  if(!action) return;
+  let params = {};
+  const raw = $('actParams').value.trim();
+  if(raw){
+    try{ params = JSON.parse(raw); }
+    catch(e){ $('actResult').innerHTML = '<div class="empty" style="color:#d33">参数不是合法 JSON：'+esc(String(e))+'</div>'; return; }
+  }
+  $('actRunBtn').disabled = true;
+  $('actResult').innerHTML = '<div class="empty">执行中…</div>';
+  let j;
+  try{
+    j = await aapi('/api/action/run', {action, params, confirmed: $('actConfirm').checked});
+  }catch(e){ j = {status:'error', error:String(e)}; }
+  $('actRunBtn').disabled = false;
+  const [label,color] = ACT_STATUS[j.status] || [j.status||'', '#d33'];
+  $('actResult').innerHTML = `<div class="hint" style="color:${color}">状态：${esc(label)}　${esc(j.message||'')}</div>
+    <div class="src" style="margin-top:6px;white-space:pre-wrap">${esc(JSON.stringify(j.result || j.error || j, null, 2))}</div>`
+    + (j.status==='needs_confirmation'
+        ? '<div class="hint" style="margin-top:6px">该动作不可逆，未被自动确认。勾选「我确认执行」后重放即可。</div>' : '');
+  loadActions();
+}
+$('actName').onchange = fillActionParams;
+$('actionRefresh').onclick = loadActions;
+$('actRunBtn').onclick = runActionOnce;
 
 // ===== 接口配置面板（傻瓜化）=====
 const CFG_FIELDS = [

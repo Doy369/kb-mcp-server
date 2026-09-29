@@ -31,6 +31,7 @@ class AgentContext:
     graph_facts: dict = field(default_factory=dict)       # GraphReasoner 写
     live: list[dict] = field(default_factory=list)        # LiveData 写
     graph_info: dict = field(default_factory=dict)        # GraphBuilder 写
+    actions: list[dict] = field(default_factory=list)     # P2-9 ActionAgent 写（含被拒/待确认）
     answer: dict = field(default_factory=dict)            # Synthesizer 写
     data: dict = field(default_factory=dict)              # 编排器用（plan / trace）
 
@@ -59,6 +60,9 @@ class BaseAgent(ABC):
     role: str = ""
     description: str = ""
     capabilities: list[str] = []          # P1-4 能力标签，供 AgentRegistry 发现
+    # P2-9 参与闸门：留空=始终可被提名；非空=该配置键为真时才参与动态组队。
+    # 有副作用的 agent（如 ActionAgent）必须挂闸门，宁可默认不动手。
+    gated_by: str = ""
 
     @abstractmethod
     def run(self, ctx: AgentContext) -> AgentResult:

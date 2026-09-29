@@ -97,6 +97,8 @@ API_CONFIG_KEYS = [
     # P1-4 动态协作：协作模式 / 规划器 / 多轮协商轮次 / 人工介入
     "KB_AGENT_MODE", "KB_AGENT_PLANNER", "KB_AGENT_MAX_ROUNDS", "KB_AGENT_HITL",
     "KB_AGENT_BUILD_GRAPH",
+    # P2-9 动作型工具：执行者开关 + 动作审计日志路径（"off" 表示不落盘）
+    "KB_AGENT_ACTIONS", "KB_ACTION_LOG",
     "KB_CORS_ORIGINS", "KB_CORS_DEV_OPEN",
 ]
 _KEY_MASK = "***已设置***"
@@ -382,6 +384,10 @@ class Handler(BaseHTTPRequestHandler):
             # P1-5 审计日志：最近 50 条问答记录（新→旧）
             from kb_mcp_server.audit import read_recent
             return 200, {"entries": read_recent(50)}, None
+        if path == "/api/actions":
+            # P2-9 动作层：执行者开关 + 动作清单（风险分级/参数契约）+ 最近动作审计
+            from kb_mcp_server.agents import get_orchestrator
+            return 200, get_orchestrator().actions_roster(), None
         return 404, {"error": "not found"}, None
 
     def _post(self, path: str, payload: dict):
@@ -613,7 +619,23 @@ class Handler(BaseHTTPRequestHandler):
                 "planner": type(o.planner).__name__,
                 "max_rounds": max_rounds,
                 "hitl": get_cfg("KB_AGENT_HITL", "0").lower() in ("1", "true", "yes"),
+                # P2-9：动作层（执行者 + 动作清单 + 最近审计），与只读 agent 清单分开
+                "actions": o.actions_roster(),
             }, None
+
+        # ---- P2-9 动作型工具（有副作用：风险分级 + 确认门 + 审计）----
+        if path == "/api/action/run":
+            from kb_mcp_server.actions import run_action
+
+            res = run_action(str(payload.get("action") or ""),
+                             payload.get("params") or {},
+                             confirmed=bool(payload.get("confirmed")),
+                             actor=str(payload.get("actor") or "web-console"))
+            return 200, res, {
+                "action": res.get("action"),
+                "action_status": res.get("status"),
+                "risk": res.get("risk"),
+            }
 
         if path == "/api/delete_doc":
             doc_id = payload.get("doc_id", "")

@@ -101,14 +101,56 @@ def _live_line(c: dict) -> str:
     return f"{c.get('adapter', '')}：{c.get('note', '')}"
 
 
+def _action_line(a: dict) -> str:
+    """把一条动作结果渲染成一行可读文本（P2-9）。**对未知动作类型也安全**。
+
+    三种终态必须能区分清楚，否则用户/客服无法判断「到底做没做」：
+    已执行（executed）/ 待确认（needs_confirmation）/ 被拒（rejected）。
+    """
+    name = str(a.get("action", "") or "")
+    res = a.get("result") or {}
+    status = a.get("status")
+    if status == "executed":
+        if name == "create_ticket":
+            return (f"已创建工单 {res.get('ticket_id')}（{res.get('priority')}，"
+                    f"承诺 {res.get('sla_response')} 响应）：{res.get('subject', '')}")
+        if name == "update_order":
+            return (f"订单 {res.get('order_id')} 的"
+                    f"{res.get('field_label') or res.get('field')}已改为「{res.get('new_value')}」")
+        if name == "request_refund":
+            return (f"退款申请已提交：{res.get('refund_id')}，订单 {res.get('order_id')}，"
+                    f"金额 {res.get('amount')} 元")
+        if name == "list_tickets":
+            return f"当前工单 {res.get('count', 0)} 条"
+        return f"已执行动作 {name}"
+    if status == "needs_confirmation":
+        given = (a.get("preview") or {}).get("given") or {}
+        amt = f" {given.get('amount')} 元" if given.get("amount") not in (None, "") else ""
+        oid = f"（订单 {given.get('order_id')}）" if given.get("order_id") else ""
+        return f"待确认：{name or '该动作'}{amt}{oid}——不可逆，需人工确认后才会执行"
+    return f"未执行 {name or '动作'}：{a.get('error') or '未知原因'}"
+
+
+def _action_lines(actions: list[dict] | None) -> list[str]:
+    return [_action_line(a) for a in (actions or [])]
+
+
 def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
-                       graph_facts: dict | None = None) -> tuple[str, str]:
+                       graph_facts: dict | None = None,
+                       actions: list[dict] | None = None) -> tuple[str, str]:
     """返回 (summary 摘要, detail 详情)。"""
     top = hits[0] if hits else None
     summary = _clean_content(top["content"])[:160] if top else ""
     graph_lines = _graph_lines(graph_facts)
+    action_lines = _action_lines(actions)
 
     parts: list[str] = []
+    # 动作结果排最前：用户要求「执行某动作」时，做没做才是他关心的第一件事。
+    if action_lines:
+        parts.append("【执行动作】")
+        for line in action_lines:
+            parts.append(f"- {line}")
+
     if live_cards:
         parts.append("【实时数据】")
         for c in live_cards:
@@ -119,8 +161,11 @@ def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
         for i, line in enumerate(graph_lines, 1):
             parts.append(f"{i}. {line}")
 
-    if not summary and not live_cards and not graph_lines:
+    if not summary and not live_cards and not graph_lines and not action_lines:
         summary = "未在知识库中找到相关片段，建议补充知识或转人工客服。"
+    elif action_lines and not summary:
+        # 没有知识命中时，摘要直接给动作结果，避免「答非所问」的空摘要
+        summary = action_lines[0][:160]
 
     if hits:
         parts.append("【知识依据】")
@@ -132,17 +177,21 @@ def template_synthesis(question: str, hits: list[dict], live_cards: list[dict],
 
 
 def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], history: list[dict] | None = None,
-                    graph_facts: dict | None = None) -> str | None:
+                    graph_facts: dict | None = None,
+                    actions: list[dict] | None = None) -> str | None:
     """调用本地 LLM 合成自然语言答复；任何异常返回 None（交由模板回退）。"""
     c = _llm_cfg()
     ctx = "\n".join(f"- {_clean_content(h['content'])}" for h in hits)
     live_txt = "\n".join(_live_line(c) for c in live_cards)
     graph_txt = "\n".join(f"- {line}" for line in _graph_lines(graph_facts))
+    action_txt = "\n".join(f"- {line}" for line in _action_lines(actions))
     prompt = (
         "你是企业 B2B 客服助手。仅依据给定的知识片段、关系事实与实时数据，用简洁中文回答用户问题，"
         "不要编造信息。关系事实来自知识图谱，其路径即为判断依据，可在答复中说明推理链路。\n\n"
         f"用户问题：{question}\n\n知识片段：\n{ctx}\n\n"
-        f"关系事实：\n{graph_txt}\n\n实时数据：\n{live_txt}\n\n答复："
+        f"关系事实：\n{graph_txt}\n\n实时数据：\n{live_txt}\n\n"
+        "系统动作记录（**只能照实转述，不得承诺未列出的操作**；标注「待确认」的必须提示用户确认后才会执行）：\n"
+        f"{action_txt or '（无）'}\n\n答复："
     )
     if history:
         hist_txt = "\n".join(
@@ -157,15 +206,17 @@ def _llm_synthesize(question: str, hits: list[dict], live_cards: list[dict], his
 
 
 def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str | None = None,
-               history: list[dict] | None = None, graph_facts: dict | None = None) -> dict:
-    """入口：装配最终答复。语义侧（hits）+ 关系侧（graph_facts）+ 实时数据（live）融合。"""
+               history: list[dict] | None = None, graph_facts: dict | None = None,
+               actions: list[dict] | None = None) -> dict:
+    """入口：装配最终答复。语义侧（hits）+ 关系侧（graph_facts）+ 实时数据（live）+ 动作（actions）融合。"""
     c = _llm_cfg()
     live_cards = normalize_live(live)
-    summary, detail = template_synthesis(question, hits, live_cards, graph_facts)
+    summary, detail = template_synthesis(question, hits, live_cards, graph_facts, actions)
     method = "template"
 
     if c["enabled"]:
-        llm_text = _llm_synthesize(question, hits, live_cards, history=history, graph_facts=graph_facts)
+        llm_text = _llm_synthesize(question, hits, live_cards, history=history,
+                                   graph_facts=graph_facts, actions=actions)
         if llm_text:
             summary = llm_text[:200]
             detail = llm_text
@@ -187,6 +238,7 @@ def synthesize(question: str, hits: list[dict], live: list[dict], trace_id: str 
         "sources": [{"doc_id": h["doc_id"], "score": round(h["score"], 4)} for h in hits],
         "live_data": live,
         "live_cards": live_cards,
+        "actions": list(actions or []),
         "graph_entities": (graph_facts or {}).get("entities", []),
         "graph_facts": (graph_facts or {}).get("facts", []),
         "graph_paths": _graph_lines(graph_facts),

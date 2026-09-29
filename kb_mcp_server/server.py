@@ -210,15 +210,16 @@ def graph_rebuild() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# P7 · 多 agent 协作（编排器 + 4 个职责 agent，共享同一张图与向量库）
+# P7 · 多 agent 协作（编排器 + 5 个职责 agent，共享同一张图与向量库）
 # --------------------------------------------------------------------------- #
 @mcp.tool()
 def multi_agent_ask(question: str, top_k: int = 5, order_id: str | None = None,
                     sku: str | None = None, history: list[dict] | None = None) -> dict:
     """多 agent 协作问答。
 
-    编排器调度 4 个职责 agent：GraphBuilder（增量补图）→
-    [Retriever（语义召回）∥ GraphReasoner（图谱多跳）∥ LiveData（实时数据）] →
+    编排器调度多个职责 agent：GraphBuilder（增量补图）→
+    [Retriever（语义召回）∥ GraphReasoner（图谱多跳）∥ LiveData（实时数据）
+     ∥ ActionAgent（动作执行，默认关闭）] →
     Synthesizer（合成）。答复附带每个 agent 的耗时 / 成败 / 摘要轨迹（agents.trace）。
 
     模式由 KB_AGENT_MODE 决定：deterministic（默认，零 LLM，离线可跑）| llm（本地 LLM 路由，
@@ -228,6 +229,10 @@ def multi_agent_ask(question: str, top_k: int = 5, order_id: str | None = None,
     （失败回退确定性）；KB_AGENT_MAX_ROUNDS>1 时 worker 产出后由证据协商补查缺口；
     KB_AGENT_HITL=1 时护栏判定「需人工复核」的答复标记 pending_human。
     协作轨迹见返回的 collaboration 段（每轮分工 / 协商结论）。
+
+    P2-9 动作型工具（可选，默认关闭）：KB_AGENT_ACTIONS=1 时 ActionAgent 参与编排，
+    识别「退款 / 改单 / 建工单」等动作意图并真正执行；不可逆动作只会停在待确认
+    （见返回的 actions / pending_actions），并同样并入 pending_human 判定。
     """
     from kb_mcp_server.agents import get_orchestrator
 
@@ -241,8 +246,47 @@ def agent_status() -> dict:
     from kb_mcp_server.agents import get_orchestrator
 
     o = get_orchestrator()
-    return {"mode": o.mode, "agents": o.agents_status(),
-            "roster": o.roster(), "planner": type(o.planner).__name__}
+    return {"mode": o.mode, "agents": o.agents_status(), "roster": o.roster(),
+            "planner": type(o.planner).__name__, "actions": o.actions_roster()}
+
+
+# --------------------------------------------------------------------------- #
+# P2-9 · 动作型工具（与检索型工具的本质区别：**有副作用**）
+#
+# 因此对外暴露时多了三样东西：风险分级（read/write/destructive）、
+# 是否需要确认（requires_confirm）、以及每次尝试都落审计（KB_ACTION_LOG）。
+# 「能被真实 MCP 客户端调起并真的产生副作用」才是 MCP 从标题变成实质的证据。
+# --------------------------------------------------------------------------- #
+@mcp.tool()
+def list_actions() -> dict:
+    """列出可用动作及其风险分级、是否需要确认、参数契约，并回带最近的动作审计。
+
+    risk 含义：read（只读）| write（改业务数据）| destructive（不可逆/涉及资金）。
+    需要确认的动作（requires_confirm=true）必须以 confirmed=true 重放才会执行。
+    """
+    from kb_mcp_server.actions import action_tools, read_action_log
+    from kb_mcp_server.agents.workers import ActionAgent
+    from kb_mcp_server.extensions import agent_gate_open
+
+    return {"enabled": agent_gate_open(ActionAgent()),
+            "actions": action_tools().list(),
+            "recent": read_action_log(10)}
+
+
+@mcp.tool()
+def run_action(action: str, params: dict | None = None, confirmed: bool = False,
+               actor: str = "mcp-client") -> dict:
+    """执行一个动作（create_ticket / update_order / request_refund / list_tickets）。
+
+    **安全底线**：risk=destructive 的动作（退款）在 confirmed 不为 true 时
+    **一律不执行**，只返回 status=needs_confirmation 并回显待执行的参数，
+    必须由人工确认后以 confirmed=true 重放。
+    返回 status ∈ {executed, needs_confirmation, rejected}；失败不抛异常。
+    每次尝试（含被拒 / 待确认）都会写入动作审计日志。
+    """
+    from kb_mcp_server.actions import run_action as _run
+
+    return _run(action, params, confirmed=confirmed, actor=actor or "mcp-client")
 
 
 if __name__ == "__main__":
