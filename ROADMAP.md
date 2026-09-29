@@ -1,7 +1,7 @@
 # 待解决优先级 · 上线路线图（ROADMAP）
 
 > 当前状态：**可演示的企业级原型，核心链路已闭环**，完成度约 **78–84%**（2026-09-29 复核）。
-> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 282 例 + CI 七 job 真实跑通
+> 已完成：真实 LLM 接入 + 语义级评测闭环、bge 真实嵌入、置信度护栏 + 审计、自动化测试 286 例 + CI 七 job 真实跑通
 > （2026-09-29，`CI #13` / run `36541763060`，40s 四 job 全绿）、
 > 语料对齐、规模化召回评测、**多 agent 动态协作（任务分解 / 多轮协商 / 人工介入）**、
 > **动作型工具 + 真实 MCP 协议端到端（协议握手 / 工具调用 / 确认门 / 动作审计）**、
@@ -225,7 +225,7 @@
 ### P2-10 自动化测试与 CI —— **已落地（2026-09-16）· CI 真实跑通（2026-09-29）**
 - ~~现状：零自动化测试（仅有离线自检脚本）。~~
 - **已落地**：
-  - **pytest 单测 282 例**（`tests/`，**约 12s** 跑完，离线零外部依赖）：
+  - **pytest 单测 286 例**（`tests/`，**约 12s** 跑完，离线零外部依赖）：
     - `test_ingestion_storage.py`（43）：结构感知分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、
       嵌入器单例、向量归一化、存储增删查与持久化、损坏文件容错、图谱本体约束、多格式解析、
       **PG 懒连接 / 注册时序 / 写库参数适配**（P0-3）。
@@ -248,10 +248,13 @@
       报告缺失必失败。理由：该脚本**同时把守 `test` 与 `bge` 两个 job**，
       参数解析写错的表现是**静默失效**（CI 照样绿，只是不再拦任何东西），
       这类共享逻辑必须有测试（P2-10 补）。
-    - `test_graph_age_cypher.py`（11）：**AGE `cypher()` 列定义列表契约**——列数必须等于
-      `RETURN` 表达式数。假连接抓 SQL，断言 `find_entities`=3 / `neighbors`=4 / `paths`=2 /
-      `export_graph`=5 列，单列接口恒 1 列，终止型语句 `nout=0` 收敛到 1 列，**不需要真实 PG**。
-      理由：这条契约只在真机上才暴露（见 P2-10 补小节那段 `age` job 首跑抓 bug）。
+    - `test_graph_age_cypher.py`（15）：**AGE `cypher()` 两条硬约束**——
+      ① 列定义列表列数必须等于 `RETURN` 表达式数（`find_entities`=3 / `neighbors`=4 /
+      `paths`=2 / `export_graph`=5；终止型 `nout=0` 收敛到 1 列）；
+      ② 图名与 Cypher 原文必须是**常量字面量**（内联 `'kb_graph'` + 美元引用
+      `$kb$…$kb$`，绝不出现 `$1/$2`），只有第三个 agtype 参数允许绑定。假连接抓 SQL 断言，
+      **不需要真实 PG**。理由：这两条契约只在真机上才暴露（见 P2-10 补小节
+      「`age` job 首跑连抓两个 bug」）。
   - **GitHub Actions CI**（`.github/workflows/ci.yml`）：单测 → 回归评测 → 基线校验，
     三段串行；通过率低于基线则 CI 变红**卡住合并**，评测报告作为 artifact 归档 30 天。
     另有六个独立 job：
@@ -306,18 +309,30 @@
   （那会让每次 CI 多花几分钟）——这是个刻意做的成本取舍。
 - 最关键的一条断言是「**未静默降级**」：`get_graph_store()` 内部 `try/except` 会在
   连不上 AGE 时**悄悄换成 memory 图**，主链路照跑、CI 照绿。脚本把这条顶死。
-- **首跑即抓出一个真 bug：列定义列表契约**（这正是「真跑」的价值）。
-  `_cypher()` 长期恒声明单列 `(v agtype)`，而 `find_entities`（3 列）/ `neighbors`（4 列）/
-  `paths`（2 列）/ `export_graph`（5 列）都是多列 `RETURN`。AGE 的 `cypher()` 返回
-  `SETOF record`，PostgreSQL 会逐一比对列定义列表与实际返回列数，不符即报
-  `return row and column definition list do not match`。这些读接口在 memory 后端
-  （全部单测 + 本地）永远走不到 → 「一直没错」；一到真实 AGE 就崩（CI 首跑 exit 1）。
-  - **修复**：`_cypher(query, params, nout=1)` 按 `nout` 生成列定义列表；四个读接口分别
-    传 3/4/2/5。终止型语句（`DELETE` / `DETACH DELETE` 无 `RETURN`）按官方手册**仍需声明一列**，
-    只是返回 0 行，故 `nout` 下限取 1。
-  - **防回归**：新增 `tests/test_graph_age_cypher.py`（11 例，假连接抓 SQL 断言列数，**不需要真实 PG**）。
-  - **可诊断**：`check_age.py` 增加「多列 RETURN / 5 列 RETURN / MERGE 关系空属性表」三条
-    **语法探针**，同类问题下一轮 CI 直接给出 `::error::` 注解，不必再靠日志。
+- **首跑即连抓两个真 bug：AGE `cypher()` 的两条硬约束**（这就是「真跑」的价值）。
+  AGE 在 `post_parse_analyze_hook` 里拦截 `cypher()` 做语法改写，于是：
+  - **① 图名与 Cypher 原文必须是常量字面量，不能是绑定参数。**
+    `_cypher()` 原本写 `ag_catalog.cypher(%s, %s)`，把图名与 Cypher 都当 `$1/$2` 传，
+    AGE 读不到 Cypher 原文 → `a name constant is expected`。
+    **修复**：图名内联 `'kb_graph'`、Cypher 用美元引用 `$kb$ … $kb$` 原样内联
+    （美元引用天然免单引号双重转义，这也是 AGE 官方推荐形态）；只有可选的第 3 个
+    agtype 参数映射允许是绑定参数。无参数时**不能**给 `execute` 传第二参数，否则
+    Cypher 里的 `%` 会被 psycopg 当占位符。
+  - **② 列定义列表列数必须等于 `RETURN` 表达式数。**
+    原本恒声明单列 `(v agtype)`，而 `find_entities`（3 列）/ `neighbors`（4 列）/
+    `paths`（2 列）/ `export_graph`（5 列）都是多列 `RETURN` → 报
+    `return row and column definition list do not match`。
+    **修复**：`_cypher(..., nout=1)` 按 `nout` 生成列定义列表；终止型语句
+    （`DELETE` / `DETACH DELETE` 无 `RETURN`）按官方手册**仍需声明一列**（返回 0 行），
+    故 `nout` 下限取 1。
+  - 两条都**只在真机暴露**：本地 memory 后端根本不生成 SQL，全部单测自然全绿。
+    这正是「代码写了但没有任何自动化证据」的典型后果。
+  - **防回归**：`tests/test_graph_age_cypher.py`（15 例，假连接抓 SQL，**不需要真实 PG**）。
+  - **可诊断**：`check_age.py` 重写为「阶段隔离异常 + 报告无论成败必落盘 +
+    `::error::` / `::notice::` 注解」——CI 无日志下载权限也能定位（**本轮就是靠注解
+    直接读出上面两条错误**）；探针侧独立实现 `cypher_sql()` 内联逻辑 + `raw()` 自行
+    `SET search_path`，保持「旁路交叉验证」而非复用产品代码。新增「多列 RETURN /
+    5 列 RETURN / MERGE 关系空属性表」三条语法探针。
 
 **3) bge 独立 CI job**（CI `bge` job）
 - `eval_run.py` 新增 `--out`：bge 与 dev 是**两种口径的产物**，混在一个报告里
@@ -492,7 +507,7 @@
 **已完成的历史首步**（保留供追溯）：
 1. ~~P1-5 + P0-1~~：`golden.jsonl` + `RegressionEvaluator` 已落地 → **✅ 已完成**。
 2. ~~P0-3 Path A（bge 嵌入）~~：通过率 91% → 100% → **✅ 已完成**。
-3. ~~P2-10 测试 + CI~~：282 例单测 + Actions 七 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
+3. ~~P2-10 测试 + CI~~：286 例单测 + Actions 七 job 流水线 → **✅ 已完成并于 2026-09-29 真实跑通**。
 4. ~~P0-3 Path B（pgvector 生产存储）~~ → **✅ 已完成（2026-09-29）**：
    已在真实 PG 上跑通，并抓出/修掉 3 个只有真库才暴露的缺陷（见 P0-3 小节）。
 5. ~~P0-2（重试 / 熔断 / 降级）~~ → **✅ 已完成（2026-09-29）**：

@@ -118,13 +118,38 @@ def phase(label: str, fn, *, required: bool = False):
 
 
 def raw(sql: str, args: tuple = ()) -> list[tuple]:
-    """独立连接执行原始 SQL：**与 store 内部连接分开**，构成真正的旁路对账。"""
+    """独立连接执行原始 SQL：**与 store 内部连接分开**，构成真正的旁路对账。
+
+    注意两个坑：
+      · 必须自己 `SET search_path`——`agtype` / `ag_catalog` 下的类型在新连接里
+        默认不可见，否则报 `type "agtype" does not exist`；
+      · 无参数时**不要**给 `execute` 传第二个参数，免得 SQL 里的 `%` 被当占位符。
+    """
     import psycopg
 
     with psycopg.connect(DSN, autocommit=True) as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, args)
+            cur.execute('SET search_path = ag_catalog, "$user", public;')
+            if args:
+                cur.execute(sql, args)
+            else:
+                cur.execute(sql)
             return cur.fetchall()
+
+
+def cypher_sql(graph: str, query: str, cols: str = "v agtype") -> str:
+    """构造 `cypher()` 调用 SQL。
+
+    这里**刻意不复用** `graph.py` 里的实现：本脚本的职责是「独立旁路验证」，
+    与产品代码共用拼串逻辑就失去了交叉验证的意义。两处都遵守同一条 AGE 硬约束：
+    图名与 Cypher 原文必须是常量字面量（不能是绑定参数），Cypher 用美元引用内联。
+    """
+    g = "'" + str(graph).replace("'", "''") + "'"
+    tag, i = "$kb$", 0
+    while tag in query:
+        i += 1
+        tag = "$kb" + ("q" * i) + "$"
+    return f"SELECT * FROM ag_catalog.cypher({g}, {tag} {query} {tag}) as ({cols});"
 
 
 def count_labels(graph: str) -> tuple[int, int, dict]:
@@ -205,7 +230,7 @@ def _stage_no_silent_fallback():
 def _probe_capabilities() -> None:
     def probe(label: str, query: str, cols: str = "v agtype") -> bool:
         try:
-            raw(f"SELECT * FROM ag_catalog.cypher(%s, %s) as ({cols});", (GRAPH, query))
+            raw(cypher_sql(GRAPH, query, cols))
             check(label, True, "")
             return True
         except Exception as e:  # noqa: BLE001

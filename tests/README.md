@@ -1,7 +1,7 @@
-# tests/ — 自动化测试（282 例，离线零服务依赖）
+# tests/ — 自动化测试（286 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 282 passed，本地约 12s
+python -m pytest tests/ -q      # 286 passed，本地约 12s
 ```
 
 不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
@@ -23,7 +23,13 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 | `test_planner_collaboration.py` | 48 | P1-4 动态协作：LLM 任务分解（```json 包裹 / 前后噪声 / 幻觉 agent 丢弃 / capability 别名 / 骨架 agent 不入候选）、四条降级路径必回退且不抛异常、协商只提未执行能力（保证收敛）、多轮补轮不重复执行、默认单轮等价旧行为、HITL 开关与挂起、配置容错 |
 | `test_actions.py` | 53 | P2-9 动作型工具：**参数契约**（缺必填/非法枚举一律 rejected）、**确认门**（destructive 未确认绝不执行且不产生 result）、**审计三终态全留痕**（含可关闭）、意图识别与参数抽取（含「订单号里的数字不得被当成金额」回归）、ActionAgent 三道闸（参与闸门 / 意图闸门 / `confirmed` 恒 False）、接入编排（开关 / 轨迹 / 与 HITL 闭环 / 对外契约不变）、合成三终态渲染对未知动作类型安全 |
 | `test_baseline_gate.py` | 11 | `scripts/check_baseline.py`（**同时把守 `test` 与 `bge` 两个 job**）：默认阈值 0.72、`KB_BASELINE_MIN` 覆盖、非法阈值必须炸（不许静默退回默认值）、报告路径三种来源与优先级、相对路径按**仓库根**解析、恰好等于阈值放行、低于阈值必红、报告缺失必失败 |
-| `test_graph_age_cypher.py` | 11 | AGE `cypher()` 的**列定义列表契约**：列数必须与 `RETURN` 表达式数逐一相等。用假连接抓 SQL 断言 `find_entities`=3 / `neighbors`=4 / `paths`=2 / `export_graph`=5 列，单列接口（`upsert_*` / `stats`）恒 1 列，终止型语句（`clear`）`nout=0` 收敛到 1 列。**不需要真实 PG** |
+| `test_graph_age_cypher.py` | 15 | AGE `cypher()` 的**两条硬约束**（都由真机才暴露）：① 列定义列表列数必须等于 `RETURN` 表达式数（`find_entities`=3 / `neighbors`=4 / `paths`=2 / `export_graph`=5；单列接口恒 1 列；终止型 `nout=0` 收敛到 1 列）；② 图名与 Cypher 原文必须是**常量字面量**（内联 `'kb_graph'` + 美元引用 `$kb$…$kb$`，绝不出现 `$1/$2`），只有第三个 agtype 参数允许绑定。含美元标签冲突回退与单引号转义。**不需要真实 PG** |
+
+> `test_graph_age_cypher.py` 锁的两条契约**只在真机上才暴露**：AGE 的 `cypher()` 会被
+> `post_parse_analyze_hook` 拦截做语法改写，既要求能读到 Cypher **原文**（故不能是绑定
+> 参数 `$2`），又要求列定义列表与 `RETURN` 表达式数**逐一相等**。本地 memory 后端根本
+> 不生成 SQL，于是「一直没错」；`age` job 一上真机就把这两个接口打挂。更关键的是
+> 这条经验本身：**「代码写了但没有任何自动化证据」= 未知状态**，真跑的价值就在于此。
 
 > `test_baseline_gate.py` 存在的理由值得单独说一句：CI 脚本过去没有测试，
 > 但它一旦「参数解析写错」，表现不是报错而是**静默失效**——CI 照样绿，

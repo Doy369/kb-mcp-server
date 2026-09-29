@@ -474,11 +474,12 @@ class AGEGraphStore(GraphStore):
       SET search_path = ag_catalog, "$user", public;
       SELECT create_graph('kb_graph');
 
-    注意：AGE 的 cypher() 在不同版本对参数绑定与子句的支持不一致；`_cypher()` 统一做
-    标识符转义，并把 **RETURN 列数**（`nout`）显式对齐——AGE 的列定义列表必须与
-    RETURN 表达式数逐一相等，否则 PostgreSQL 报 `return row and column definition list
-    do not match`。本后端的真机验证由 CI `age` job（`scripts/check_age.py`）承担，
-    覆盖：扩展/建图/不静默降级/语法探针/真实摄取写入/原始表对账/读回/清理。
+    AGE 的两条硬约束（都在真机上踩过，详见 `_cypher()` 文档）：
+      1) 图名与 Cypher 原文必须是**常量字面量**（内联 + 美元引用），不能是绑定参数；
+      2) 列定义列表列数必须等于 `RETURN` 表达式数（`nout`）。
+
+    本后端的真机验证由 CI `age` job（`scripts/check_age.py`）承担，覆盖：
+    扩展 / 建图 / 不静默降级 / 语法能力探针 / 真实摄取写入 / 原始表对账 / 读回 / 清理。
     """
 
     backend = "age"
@@ -520,32 +521,63 @@ class AGEGraphStore(GraphStore):
                 pass
 
     # ---- Cypher 执行 ----
+    @staticmethod
+    def _dollar_tag(query: str) -> str:
+        """挑一个不与 query 冲突的美元引用标签（默认 `$kb$`）。
+
+        为什么不直接拼单引号字符串：Cypher 里到处是 `'...'`（属性值），
+        再用单引号包裹就得反斜杠转义，AGE 又明确警告「双重转义会破坏报错定位」。
+        美元引用是 AGE 官方推荐形态，天然免转义。
+        """
+        tag, i = "$kb$", 0
+        while tag in query:
+            i += 1
+            tag = "$kb" + ("q" * i) + "$"
+        return tag
+
+    @staticmethod
+    def _sql_literal(v: str) -> str:
+        return "'" + str(v).replace("'", "''") + "'"
+
     def _cypher(self, query: str, params: tuple = (), nout: int = 1) -> list[tuple]:
         """执行 Cypher，返回行元组。
 
-        `nout` = Cypher `RETURN` 表达式的个数，**必须与实际返回列数逐一对齐**：
-        AGE 的 `cypher()` 返回 SETOF record，PostgreSQL 会拿列定义列表跟实际返回列数
-        做比对，数量不符即报 `return row and column definition list do not match`
-        （见 stackoverflow.com/q/76083218）。此前这里恒声明单列 `(v agtype)`，
-        于是所有多列 RETURN 的读接口（find_entities / neighbors / paths / export_graph）
-        在真实 AGE 上必然报错——这正是「代码写了但从未真跑过」的典型后果。
+        AGE 在 `post_parse_analyze_hook` 里拦截 `cypher()` 并做语法改写，由此带来
+        **两条硬约束**，都在真实 AGE 上踩过：
 
-        终止型语句（DELETE / DETACH DELETE，无 RETURN）按官方手册
-        （age-manual: terminal DELETE clauses）**仍需声明一列**，只是该列返回 0 行，
-        故 nout 下限取 1。
+        1) **图名与 Cypher 原文必须是常量字面量，不能是绑定参数。**
+           AGE 要直接读到 Cypher 原文才能解析；传 `$2` 会报
+           `a name constant is expected`（源码：`cypher_analyze.c` 的
+           `convert_cypher_to_subquery`，非字符串常量即报错）。
+           故这里把图名内联成 `'kb_graph'`、Cypher 用美元引用原样内联。
+           只有**可选的第三个参数**（agtype 参数映射）允许是绑定参数——那是 AGE
+           官方支持的 prepared-statement 形态。
+
+        2) **列定义列表的列数必须等于 `RETURN` 表达式数。**
+           `cypher()` 返回 SETOF record，PostgreSQL 逐一比对，不符即报
+           `return row and column definition list do not match`
+           （见 stackoverflow.com/q/76083218）。此前恒声明单列 `(v agtype)`，
+           于是 find_entities / neighbors / paths / export_graph 全数在真机报错。
+           终止型语句（DELETE / DETACH DELETE，无 RETURN）按官方手册
+           （age-manual: terminal DELETE clauses）仍需声明一列（返回 0 行），
+           故 `nout` 下限取 1。
         """
         assert self.conn is not None
         nout = max(1, int(nout))
         cols = ", ".join(f"c{i} agtype" for i in range(nout))
+        tag = self._dollar_tag(query)
         sql = (
-            "SELECT * FROM ag_catalog.cypher(%s, %s"
-            + (", %s" if params else "")
-            + f") as ({cols});"
+            f"SELECT * FROM ag_catalog.cypher({self._sql_literal(self.graph_name)}, "
+            f"{tag} {query} {tag}" + (", %s" if params else "") + f") as ({cols});"
         )
-        args = (self.graph_name, query) + (tuple(params),) if params else (self.graph_name, query)
         with self.conn.cursor() as cur:
             cur.execute("SET search_path = ag_catalog, \"$user\", public;")
-            cur.execute(sql, args)
+            # 无参数时**不加**第二参数：psycopg 只在给了参数时才处理 `%` 占位，
+            # 否则 Cypher 里的 `%` 会被误当成占位符。
+            if params:
+                cur.execute(sql, (tuple(params),))
+            else:
+                cur.execute(sql)
             return cur.fetchall()
 
     @staticmethod
