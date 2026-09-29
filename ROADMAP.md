@@ -130,6 +130,8 @@
   | LLM 输出非法 | 回退确定性全跑，链路不断 |
   | 人工介入 | 护栏未过 → `pending_human=true`、`status=pending` |
 - 测试：`tests/test_planner_collaboration.py` **48 例**（离线零等待：LLM 用 stub、worker 用替身）。
+  全量 **207 例**通过、回归评测 91%（与基线一致，唯一 FAIL 仍是 dev 嵌入下已知的 P2 哨兵）；
+  **CI run `36533740677` 三 job 全绿**（提交 `425033f`）。
 - 仍待补：**agent 间双向消息协商**（当前是「评审 → 补人」的单向补轮，非多轮对话协商）；
   子任务依赖编排（`Subtask.depends_on` 已预留，当前各 worker 仍并行）。
 - 接口：**`Planner` / `AgentRegistry`（均已真实接入，不再是预留 seam）**。
