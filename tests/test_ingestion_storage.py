@@ -317,6 +317,110 @@ class TestPGVectorStoreLazyConnect:
         assert registered, "经 _ready 使用时必须完成 vector 适配器注册"
 
 
+class TestPGVectorStoreParamAdaptation:
+    """写库参数必须适配成 pgvector / psycopg 认可的类型（不依赖真实 PG）。
+
+    回归背景（CI 的 pg job 实测抓出，memory 后端完全不可见）：
+
+    · pgvector 只给 `Vector` / `numpy.ndarray` 注册 dumper，**裸 list 没有**——
+      psycopg 会退化成「PostgreSQL 数组」适配（`[1.0,2.0]` → 文本 `{1.0,2.0}`），
+      塞进 `vector(1024)` 列被服务端拒绝。
+    · psycopg 默认**不给 dict 注册 dumper**，`meta` 裸传会 `cannot adapt type 'dict'`，
+      必须包 `Jsonb`。
+    · 读回的 `Vector` 只有 `to_list()`（无 `tolist` / 无 `__iter__`），
+      `get_chunks` 若按 ndarray 处理会直接把 BM25 索引路径打断。
+    """
+
+    DSN = "postgresql://kb:kb@localhost:5432/kb"
+
+    # ---- 记录 execute 参数的替身 ----
+    class _Cur:
+        def __init__(self, sink, rows=None):
+            self.sink = sink
+            self._rows = rows or []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.sink.append(params)
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return (0,)
+
+    class _Conn:
+        def __init__(self, sink, rows=None):
+            self.sink = sink
+            self._rows = rows
+
+        def cursor(self):
+            return TestPGVectorStoreParamAdaptation._Cur(self.sink, self._rows)
+
+    def _store(self, monkeypatch, rows=None):
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        sink: list = []
+        s.conn = self._Conn(sink, rows)
+        s._schema_ready = True
+        monkeypatch.setattr(s, "_register", lambda: None)   # 注册时序另有专门用例
+        return s, sink
+
+    def test_add_chunk_wraps_embedding_and_meta(self, monkeypatch):
+        from pgvector import Vector
+        from psycopg.types.json import Jsonb
+
+        s, sink = self._store(monkeypatch)
+        s.add_chunk("d1", "内容", [0.1, 0.2, 0.3], {"k": 1})
+
+        params = sink[-1]
+        assert isinstance(params[2], Vector), "embedding 未转 Vector——PG 会把它当数组，vector 列拒绝写入"
+        assert isinstance(params[3], Jsonb), "meta 未转 Jsonb——psycopg 无法适配 dict"
+
+    def test_add_chunk_defaults_missing_meta_to_jsonb(self, monkeypatch):
+        from psycopg.types.json import Jsonb
+
+        s, sink = self._store(monkeypatch)
+        s.add_chunk("d1", "内容", [0.1, 0.2])
+        assert isinstance(sink[-1][3], Jsonb)
+        assert sink[-1][3].obj == {}
+
+    def test_search_wraps_query_vector(self, monkeypatch):
+        from pgvector import Vector
+
+        s, sink = self._store(monkeypatch)
+        s.search([0.1, 0.2, 0.3], top_k=3)
+
+        params = sink[-1]
+        assert isinstance(params[0], Vector), "查询向量未转 Vector"
+        assert isinstance(params[1], Vector), "ORDER BY 的查询向量未转 Vector"
+        assert params[2] == 3
+
+    def test_get_chunks_handles_pgvector_vector(self, monkeypatch):
+        """读回的 Vector 必须转成 list（否则 BM25 索引会拿到不可迭代对象）。"""
+        from pgvector import Vector
+
+        rows = [("d1", "内容", {"k": 1}, Vector([0.1, 0.2, 0.3]))]
+        s, _ = self._store(monkeypatch, rows=rows)
+
+        chunks = s.get_chunks()
+        assert chunks[0]["doc_id"] == "d1"
+        assert chunks[0]["embedding"] == pytest.approx([0.1, 0.2, 0.3])
+
+    def test_get_chunks_handles_none_embedding(self, monkeypatch):
+        rows = [("d1", "内容", None, None)]
+        s, _ = self._store(monkeypatch, rows=rows)
+        chunks = s.get_chunks()
+        assert chunks[0]["embedding"] == []
+        assert chunks[0]["meta"] == {}
+
+
 # --------------------------------------------------------------------------- #
 # 图谱本体
 # --------------------------------------------------------------------------- #

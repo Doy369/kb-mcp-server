@@ -21,7 +21,7 @@
   - 嵌入：`dev`（离线条目哈希，零依赖）⇄ `bge`（sentence-transformers 本地模型，数据不出域）。
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
-- **质量保障（P2-10）**：**125 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
+- **质量保障（P2-10）**：**130 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据。
@@ -96,7 +96,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（125 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（130 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
 │   └── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）

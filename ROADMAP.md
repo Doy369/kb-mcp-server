@@ -61,7 +61,7 @@
     「vector 扩展 / `kb_chunks` 表 / HNSW 索引 / `vector(1024)` 维度」与「`kb_chunks` 非空」。
     最后两步是关键：存储连不上时上层会走降级分支、**评测照样能过**（悄悄跑在 memory 上），
     故专门把「数据确实写进 PG」做成硬断言，堵掉静默退回。
-    **首跑即抓出两个真缺陷**（这正是「在真实 PG 上跑一遍」的价值——此前全是未验证假设）：
+    **首跑即抓出三个真缺陷**（这正是「在真实 PG 上跑一遍」的价值——此前全是未验证假设）：
     ① **鸡生蛋**：`connect()` 里先 `register_vector()`，而 `CREATE EXTENSION vector`
        在 `ensure_schema()` 才执行；pgvector 的 `register_vector` 在类型不存在时直接抛
        `ProgrammingError('vector type not found in the database')`，故**全新库上连接阶段
@@ -70,7 +70,15 @@
        显式 `connect()`；独立路径（`HybridRetriever()` 默认参数、`workers` 的
        `get_store()`、`demo_*.py`）拿到 `conn=None` 的实例，一进方法就断言失败。
        修复：`PGVectorStore` 内部**懒连接 + 懒建表 + 懒注册**（`_ready()`，幂等）。
-    两个契约各有单测锁定（`TestPGVectorStoreLazyConnect`，6 例，不依赖真实 PG）。
+    ③ **参数适配**：pgvector 只给 `Vector` / `numpy.ndarray` 注册 dumper，**裸 `list` 没有** ——
+       psycopg 退化成「PostgreSQL 数组」适配（`[1.0,2.0]` → 文本 `{1.0,2.0}`），
+       塞进 `vector(1024)` 列被服务端拒绝；`dict` 更是直接 `cannot adapt type 'dict'`，
+       `meta` 必须包 `Jsonb`；读回的 `Vector` 只有 `to_list()`（无 `tolist` / 无 `__iter__`），
+       `get_chunks` 按 ndarray 处理会直接打断 BM25 索引路径。
+       这三条在 **memory 后端完全不可见**（纯 Python 不过适配层）。
+       修复：`_to_vector()` 统一转换 + `Jsonb(meta)` + `get_chunks` 兼容 `to_list()`。
+    三个契约共 11 例单测锁定（`TestPGVectorStoreLazyConnect` / `TestPGVectorStoreParamAdaptation`，
+    均不依赖真实 PG）。
   - ❌ **AGE 图侧仍未在真实 PG 验证**：CI 用的 pgvector 镜像不含 Apache AGE，
     `setup_db.py --graph` 的建图部分按设计降级为 memory 图（不阻断）。AGE 真跑需
     自建含 AGE 扩展的镜像或独立服务，列为后续小项。

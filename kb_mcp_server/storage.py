@@ -133,6 +133,24 @@ class MemoryVectorStore(VectorStore):
         return removed
 
 
+def _to_vector(embedding):
+    """把嵌入转成 pgvector 能适配的类型。
+
+    必须显式转：psycopg 对**普通 list** 的默认 dumper 是 PostgreSQL 数组
+    （`[1.0, 2.0]` → 文本 `{1.0,2.0}`），塞进 `vector(1024)` 列会被服务端拒绝
+    （invalid input syntax for type vector）。pgvector 只给 `Vector` /
+    `numpy.ndarray` 注册了 dumper（见 pgvector/psycopg/vector.py）。
+    该缺陷在 memory 后端完全不可见（纯 Python 不走适配层），只在真实 PG 上暴露。
+    """
+    from pgvector import Vector
+
+    if isinstance(embedding, Vector):
+        return embedding
+    if hasattr(embedding, "tolist"):        # numpy.ndarray
+        return Vector(embedding.tolist())
+    return Vector(list(embedding))
+
+
 class PGVectorStore(VectorStore):
     """Postgres + pgvector 存储（混合存储的向量侧）。
 
@@ -209,20 +227,25 @@ class PGVectorStore(VectorStore):
         self._register()
 
     def add_chunk(self, doc_id: str, content: str, embedding: list[float], meta: dict | None = None) -> None:
+        from psycopg.types.json import Jsonb
+
         self._ready()
         with self.conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO kb_chunks (doc_id, content, embedding, meta) VALUES (%s, %s, %s, %s)",
-                (doc_id, content, embedding, meta or {}),
+                # 嵌入必须转 Vector、meta 必须转 Jsonb：psycopg 默认不给 dict 注册
+                # dumper（报 cannot adapt type 'dict'），裸 list 会被当成 PG 数组。
+                (doc_id, content, _to_vector(embedding), Jsonb(meta or {})),
             )
 
     def search(self, embedding: list[float], top_k: int = 5) -> list[dict]:
         self._ready()
+        query_vec = _to_vector(embedding)
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id, content, meta, 1 - (embedding <=> %s) AS score "
                 "FROM kb_chunks ORDER BY embedding <=> %s LIMIT %s",
-                (embedding, embedding, top_k),
+                (query_vec, query_vec, top_k),
             )
             rows = cur.fetchall()
         return [
@@ -238,7 +261,11 @@ class PGVectorStore(VectorStore):
         out = []
         for r in rows:
             emb = r[3]
-            if hasattr(emb, "tolist"):
+            # pgvector 的 Vector 只有 to_list()（没有 tolist/__iter__）；
+            # numpy.ndarray 走 tolist；个别驱动会返回原始文本。
+            if hasattr(emb, "to_list"):
+                emb = emb.to_list()
+            elif hasattr(emb, "tolist"):
                 emb = emb.tolist()
             elif isinstance(emb, str):
                 import json as _json

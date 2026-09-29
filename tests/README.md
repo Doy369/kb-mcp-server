@@ -13,7 +13,7 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 
 | 文件 | 例数 | 覆盖重点 |
 |---|---|---|
-| `test_ingestion_storage.py` | 38 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、PG 懒连接与「注册晚于建扩展」时序、图谱本体约束 |
+| `test_ingestion_storage.py` | 43 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、PG 懒连接 / 注册时序 / 写库参数适配、图谱本体约束 |
 | `test_retrieval.py` | 27 | BM25 分数越界回归护栏、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | 数字边界断言（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、降级链路、合成契约、14 工具注册完整性 |
