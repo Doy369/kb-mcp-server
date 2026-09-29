@@ -21,8 +21,11 @@
   - 嵌入：`dev`（离线条目哈希，零依赖）⇄ `bge`（sentence-transformers 本地模型，数据不出域）。
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
-- **质量保障（P2-10）**：**119 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI**
-  （单测 → 回归评测 → 基线校验，通过率低于阈值即阻断合并）。
+- **质量保障（P2-10）**：**119 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 双 job**
+  —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
+  ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟。
+- **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
+  （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
 
 ---
 
@@ -95,7 +98,10 @@ kb-mcp-server/
 ├── tests/                  # 自动化测试（119 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   └── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
-├── .github/workflows/ci.yml  # CI：单测 → 回归评测 → 基线校验
+├── .github/workflows/ci.yml  # CI 两 job：单测+回归评测+基线校验 / 容器镜像构建+冒烟
+├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
+├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
+├── .dockerignore
 ├── requirements.txt
 ├── .env.example            # 全部配置项示例
 └── samples/ test-docs/     # 示例知识库文档
@@ -329,6 +335,37 @@ LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，�
 ---
 
 ## 🏭 生产部署
+
+### 方式一 · 容器（推荐）
+
+```bash
+docker compose up -d          # 起 web 服务，数据落 named volume
+# 打开 http://localhost:8000
+```
+
+镜像默认只装**离线档**依赖（memory 存储 + dev 嵌入），约 150MB；需要更强能力用 build arg 分档：
+
+```bash
+docker build --build-arg ENABLE_BGE=true      -t kb-mcp-server:bge .   # 本地 bge 语义嵌入（拉 torch，镜像 2GB+）
+docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvector 客户端
+```
+
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `KB_DATA_DIR` | `/app/data` | 数据目录（compose 已挂 named volume 持久化） |
+| `PORT` | `8000` | 监听端口 |
+| `KB_STORAGE_BACKEND` | `memory` | `memory` ⇄ `pgvector` |
+| `KB_EMBEDDING_BACKEND` | `dev` | `dev` ⇄ `bge` |
+| `KB_API_MOCK` | `1` | 实时数据走 mock |
+
+镜像内置 `HEALTHCHECK` 探 `/healthz`（`docker compose ps` 可直接看健康状态）。
+需要 pgvector 时，`docker-compose.yml` 里已备好注释掉的 `pgvector/pgvector:pg16` 服务，取消注释即可。
+
+> **这一步已被 CI 持续验证**：每次提交都会构建镜像、启动容器、轮询健康检查，
+> 并在容器内真实调用 `/api/ask` 做端到端冒烟（`.github/workflows/ci.yml` 的 `docker` job）。
+> 因此「镜像能构建、容器能跑」不是一次性检查，而是提交门禁的一部分。
+
+### 方式二 · 直接跑（无容器）
 
 1. **存储切 pgvector**
    ```bash
