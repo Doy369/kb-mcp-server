@@ -21,9 +21,10 @@
   - 嵌入：`dev`（离线条目哈希，零依赖）⇄ `bge`（sentence-transformers 本地模型，数据不出域）。
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
-- **质量保障（P2-10）**：**119 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 双 job**
+- **质量保障（P2-10）**：**122 例 pytest 单测**（离线约 11s 跑完）+ **GitHub Actions CI 三 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
-  ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟。
+  ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
+  ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据。
 - **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
   （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
 
@@ -95,10 +96,11 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（119 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（122 例，离线零依赖，见 tests/README.md）
 ├── scripts/
-│   └── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
-├── .github/workflows/ci.yml  # CI 两 job：单测+回归评测+基线校验 / 容器镜像构建+冒烟
+│   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
+│   └── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
+├── .github/workflows/ci.yml  # CI 三 job：单测+评测+基线 / 容器构建+冒烟 / 真实 PG+pgvector
 ├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
 ├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
 ├── .dockerignore
@@ -365,6 +367,12 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 > 并在容器内真实调用 `/api/ask` 做端到端冒烟（`.github/workflows/ci.yml` 的 `docker` job）。
 > 因此「镜像能构建、容器能跑」不是一次性检查，而是提交门禁的一部分。
 
+> **pgvector 生产存储同样被 CI 真跑**：`pg` job 用 `pgvector/pgvector:pg16` service container
+> 起真实 Postgres → `python setup_db.py --graph` 建表 → **完整回归评测读写全部落在 PG** →
+> `scripts/check_pg.py` 校验「vector 扩展 / `kb_chunks` 表 / HNSW 索引 / `vector(1024)` 维度」与
+> 「表内非空」。最后两项专门堵住「存储连不上 → 悄悄退回 memory → 评测照样过」的静默降级。
+> 注：该镜像不含 Apache AGE，`--graph` 的建图部分会按设计降级为 memory 图（不阻断）。
+
 ### 方式二 · 直接跑（无容器）
 
 1. **存储切 pgvector**
@@ -430,8 +438,15 @@ python -m pytest tests/ -v      # 119 例，离线约 11s
 
 ### CI 流水线
 
-`.github/workflows/ci.yml`：**单测 → 回归评测 → 基线校验** 三段串行。
-通过率低于基线（72%）时 CI 变红**阻断合并**，评测报告作为 artifact 归档 30 天。
+`.github/workflows/ci.yml` 三个并行 job：
+
+| job | 内容 | 验证什么 |
+|---|---|---|
+| `test` | 单测 → 回归评测 → 基线校验 | 逻辑正确性；通过率低于基线（72%）则**阻断合并** |
+| `docker` | 构建镜像 → 启动 → 健康检查 → 容器内端到端冒烟 | 「镜像能构建」且「容器能跑」（build 成功 ≠ 能跑） |
+| `pg` | 起真实 PG + pgvector → 建表 → 回归跑在 PG → 校验 schema 与落库数据 | 生产存储路径真通，且**没有静默退回 memory** |
+
+评测报告作为 artifact 归档 30 天。
 
 **为何 CI 不跑 bge**：dev 嵌入下通过率 91%（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
 受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 100%。

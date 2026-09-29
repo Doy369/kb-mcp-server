@@ -142,16 +142,35 @@ class PGVectorStore(VectorStore):
     def __init__(self, dsn: str | None = None):
         self.dsn = dsn or get_settings().database_url
         self.conn = None
+        self._schema_ready = False
 
     def connect(self) -> None:
+        if self.conn is not None:      # 幂等：重复调用不再新开连接（避免连接泄漏）
+            return
         import psycopg
         from pgvector.psycopg import register_vector
 
         self.conn = psycopg.connect(self.dsn, autocommit=True)
         register_vector(self.conn)
 
+    def _ready(self):
+        """懒连接 + 懒建表；所有读写方法入口统一调用。
+
+        背景：get_store() 只按配置构造实例，**不保证调用方记得 connect**。
+        早先只有 app.py / server.py 显式 connect，而独立使用路径
+        （HybridRetriever() / IngestionPipeline() 默认参数、workers 里的
+        get_store()、demo_*.py）会拿到 conn=None 的实例，一进方法就断言失败。
+        把「连接 + 建表」收敛到方法内部，任何入口都能安全用 PG 后端。
+        """
+        if self.conn is None:
+            self.connect()
+        if not self._schema_ready:
+            self.ensure_schema()
+        return self.conn
+
     def ensure_schema(self) -> None:
-        assert self.conn is not None
+        if self.conn is None:
+            self.connect()
         dim = get_settings().embedding_dim
         with self.conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
@@ -170,9 +189,10 @@ class PGVectorStore(VectorStore):
                 "CREATE INDEX IF NOT EXISTS kb_chunks_embedding_idx "
                 "ON kb_chunks USING hnsw (embedding vector_cosine_ops);"
             )
+        self._schema_ready = True
 
     def add_chunk(self, doc_id: str, content: str, embedding: list[float], meta: dict | None = None) -> None:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO kb_chunks (doc_id, content, embedding, meta) VALUES (%s, %s, %s, %s)",
@@ -180,7 +200,7 @@ class PGVectorStore(VectorStore):
             )
 
     def search(self, embedding: list[float], top_k: int = 5) -> list[dict]:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id, content, meta, 1 - (embedding <=> %s) AS score "
@@ -194,7 +214,7 @@ class PGVectorStore(VectorStore):
         ]
 
     def get_chunks(self) -> list[dict]:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute("SELECT doc_id, content, meta, embedding FROM kb_chunks")
             rows = cur.fetchall()
@@ -213,13 +233,13 @@ class PGVectorStore(VectorStore):
         return out
 
     def count(self) -> int:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute("SELECT count(*) FROM kb_chunks")
             return cur.fetchone()[0]
 
     def list_docs(self) -> list[dict]:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT doc_id, count(*), min(content) FROM kb_chunks "
@@ -231,7 +251,7 @@ class PGVectorStore(VectorStore):
             ]
 
     def delete_doc(self, doc_id: str) -> int:
-        assert self.conn is not None
+        self._ready()
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM kb_chunks WHERE doc_id = %s", (doc_id,))
             return cur.rowcount

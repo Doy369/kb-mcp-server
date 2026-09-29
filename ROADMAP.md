@@ -46,7 +46,7 @@
   但**全仓库零引用**——这是本项未做的准确标志）。
 
 ### P0-3 生产级存储与向量真跑通
-- 现状（**Path A 已完成，Path B 未开始**）：
+- 现状（**Path A 已完成；Path B 向量侧已由 CI 实测通过，AGE 图侧待验**）：
   - ✅ **bge 真实嵌入已跑通**（`BAAI/bge-large-zh-v1.5`，1024 维，本地出域不泄露），
     回归通过率 91% → **100%**；**规模化召回评测已完成**（见下方「规模化召回评测」小节，992 条公开语料）。
   - ✅ **容器化已就绪且经 CI 实测**（`Dockerfile` / `docker-compose.yml` / `.dockerignore` + `KB_DATA_DIR` 数据目录支持），
@@ -55,8 +55,20 @@
     构建镜像 → 启动容器 → 轮询 `/healthz` → 探 `/api/status` → 容器内依赖自检 → 容器内真实调 `/api/ask`。
     「镜像能构建、容器能跑」不再是假设，而是**每次提交自动验证的事实**。
     顺带修掉一个静默降级缺陷：容器原本缺 `rank-bm25` / `pypdf`，会让 BM25 混合召回**无声退化**为纯向量检索。
-  - ❌ **pgvector + AGE 生产后端仍未起 PG**。
-- 待补：① 起 PG，跑 `setup_db.py --graph`；② 接 bge 嵌入验证生产存储路径（语义召回指标已在 numpy 矩阵下预演）；
+  - ✅ **pgvector 生产存储已在真实 Postgres 上跑通**（2026-09-29，CI 新增 `pg` job）：
+    用 service container 拉起 `pgvector/pgvector:pg16` → `setup_db.py --graph` 建表 →
+    **完整回归评测（`eval_run.py`）读写全部落在 PG** → 独立脚本校验
+    「vector 扩展 / `kb_chunks` 表 / HNSW 索引 / `vector(1024)` 维度」与「`kb_chunks` 非空」。
+    最后两步是关键：存储连不上时上层会走降级分支、**评测照样能过**（悄悄跑在 memory 上），
+    故专门把「数据确实写进 PG」做成硬断言，堵掉静默退回。
+    同轮修掉一个潜伏 bug：`get_store()` 只构造实例不连接，而只有 `app.py` / `server.py`
+    记得显式 `connect()` —— 独立路径（`HybridRetriever()` 默认参数、`workers` 的
+    `get_store()`、`demo_*.py`）会拿到 `conn=None` 的实例一进方法就断言失败。
+    现改为 `PGVectorStore` 内部**懒连接 + 懒建表**（`_ready()`，幂等），任何入口都能安全用 PG 后端。
+  - ❌ **AGE 图侧仍未在真实 PG 验证**：CI 用的 pgvector 镜像不含 Apache AGE，
+    `setup_db.py --graph` 的建图部分按设计降级为 memory 图（不阻断）。AGE 真跑需
+    自建含 AGE 扩展的镜像或独立服务，列为后续小项。
+- 待补：① AGE 真跑（自定义镜像）；② 接 bge 嵌入验证生产存储路径（语义召回指标已在 numpy 矩阵下预演）；
   ③ bge 改为**批量编码 + 向量持久化缓存**（当前纯 CPU 逐条编码 992 条需 826s，见性能代价一节）。
 - 接口：**`VectorStore` / `GraphStore` / `Embedder` 抽象已存在**，无需新增，直接接实现。
 
@@ -307,10 +319,10 @@
 | 序 | 事项 | 投入 | 为什么现在做 |
 |---|---|---|---|
 | ~~1~~ | ~~验证 `docker build`~~ | — | **✅ 已完成（2026-09-29）**：已并入 CI `docker` job，构建+启动+冒烟全绿 |
-| 1 | **P0-3 Path B：起 PG + `setup_db.py --graph`** | 中 | 唯一还没走过的**生产存储路径**；且 bge 批量编码的性能问题要靠 pgvector 解决 |
-| 2 | **P0-2：适配器重试 / 熔断 / 降级** | 中 | `RetryPolicy` 空壳已就位，`adapters.py` 已有 timeout + TTL + 鉴权，**只差重试与熔断**；这是「能不能接真实后端」的门槛 |
-| 3 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
-| 4 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
-| 5 | P2-10 补：负载测试 + bge 独立 CI job | 小 | CI 骨架已就位，加 job 即可 |
+| ~~2~~ | ~~P0-3 Path B：起 PG + `setup_db.py --graph`~~ | 中 | **✅ 已完成（2026-09-29）**：CI 新增 `pg` job（`pgvector/pgvector:pg16` service container）→ 建表 → 回归评测全跑在 PG → 校验 schema 与非空数据。AGE 图侧仍待自定义镜像 |
+| 1 | **P0-2：适配器重试 / 熔断 / 降级** | 中 | `RetryPolicy` 空壳已就位，`adapters.py` 已有 timeout + TTL + 鉴权，**只差重试与熔断**；这是「能不能接真实后端」的门槛 |
+| 2 | **P1-4：LLM 动态任务分解** | 大 | 让「多 agent」从固定 DAG 变成名副其实的共同体，是项目的核心叙事 |
+| 3 | P2-9：接真实 MCP host + 动作型工具 | 大 | 决定「MCP」是标题还是实质 |
+| 4 | P2-10 补：负载测试 + bge 独立 CI job + AGE 真跑 | 小 | CI 骨架已就位，加 job 即可 |
 
-> 做完 1 + 2，完成度可到 **~55%**；再做完 3，可到 **~65%**。
+> 做完 P0-2，完成度可到 **~55%**；再做 P1-4，可到 **~65%**。

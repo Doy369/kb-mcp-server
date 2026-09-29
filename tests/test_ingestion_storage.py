@@ -204,6 +204,63 @@ class TestMemoryVectorStore:
 
 
 # --------------------------------------------------------------------------- #
+# PG 存储的懒连接契约
+# --------------------------------------------------------------------------- #
+class TestPGVectorStoreLazyConnect:
+    """PGVectorStore 必须在首次使用时自动连接 + 建表。
+
+    回归背景：get_store() 只按配置构造实例，**不负责连接**。早先只有
+    app.py / server.py 显式 connect，独立使用路径（HybridRetriever() 默认参数、
+    workers 里的 get_store()、demo_*.py）拿到的是 conn=None 的实例，一进方法就
+    断言失败——设了 KB_STORAGE_BACKEND=pgvector 反而直接崩。本组用例锁住
+    「任何入口都能安全用 PG 后端」这一契约（不依赖真实 PG，纯单元）。
+    """
+
+    DSN = "postgresql://kb:kb@localhost:5432/kb"
+
+    def _store(self, monkeypatch):
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        calls = {"connect": 0}
+
+        def fake_connect():
+            calls["connect"] += 1
+            s.conn = object()          # 占位连接对象，本用例不做真实查询
+
+        monkeypatch.setattr(s, "connect", fake_connect)
+        monkeypatch.setattr(s, "ensure_schema", lambda: setattr(s, "_schema_ready", True))
+        return s, calls
+
+    def test_first_use_connects_and_builds_schema(self, monkeypatch):
+        s, calls = self._store(monkeypatch)
+        assert s.conn is None, "构造时不应建立连接（连接是惰性的）"
+        s._ready()
+        assert calls["connect"] == 1
+        assert s._schema_ready is True
+
+    def test_ready_is_idempotent(self, monkeypatch):
+        """重复调用不得重复开连接——否则每次查询泄漏一个连接。"""
+        s, calls = self._store(monkeypatch)
+        for _ in range(3):
+            s._ready()
+        assert calls["connect"] == 1
+
+    def test_explicit_connect_skips_when_already_connected(self):
+        """conn 已存在时 connect() 立即返回。
+
+        验证方式：不安装 psycopg 也不该抛 ImportError——一旦 guard 失效，
+        connect() 会走进 import 逻辑并在此环境报错，用例即失败。
+        """
+        from kb_mcp_server import storage
+
+        s = storage.PGVectorStore(dsn=self.DSN)
+        s.conn = object()
+        s.connect()                    # 有 guard 则直接 return
+        assert s.conn is not None
+
+
+# --------------------------------------------------------------------------- #
 # 图谱本体
 # --------------------------------------------------------------------------- #
 class TestGraphOntology:

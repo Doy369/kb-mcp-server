@@ -132,3 +132,83 @@ jobs:
       - name: 清理容器
         if: always()
         run: docker rm -f kb || true
+
+  # ------------------------------------------------------------------ #
+  # 3) 生产存储：真实 Postgres + pgvector
+  #
+  # 为什么需要这一步：pgvector 后端长期只做到「代码就位」——从未在真实 PG 上
+  # 跑过，因为开发机没有 docker daemon，起不了库。于是「生产存储能通」一直是
+  # 未验证假设。这里用 service container 拉起 pgvector/pgvector:pg16，跑
+  # setup_db.py 建表 + 完整回归评测，把假设变成流水线上的绿勾。
+  #
+  # 关键：光看「评测通过」不足以证明存储生效——存储连不上时代码会走降级分支，
+  # 评测照样跑在 memory 上而 CI 全绿。所以最后两步专门校验 schema 落库、且
+  # kb_chunks 里确有数据，把「静默退回」变成硬失败。
+  #
+  # 注：该镜像不含 Apache AGE，--graph 会按设计降级为 memory 图（不阻断，
+  #     AGE 生产图的能力由本地带扩展的环境单独验证）。
+  # ------------------------------------------------------------------ #
+  pg:
+    name: 生产存储（真实 PG + pgvector）
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: kb
+          POSTGRES_PASSWORD: kb
+          POSTGRES_DB: kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kb -d kb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # 与 test job 唯一的区别：存储后端换成真实 PG
+      KB_STORAGE_BACKEND: pgvector
+      KB_DATABASE_URL: postgresql://kb:kb@localhost:5432/kb
+      KB_EMBEDDING_DIM: "1024"
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+      KB_CHUNK_STRATEGY: fine
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（含 PG 驱动）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: 初始化数据库（setup_db.py --graph）
+        run: |
+          # 向量侧必须成功（失败即非零退出）；AGE 缺失导致的图降级是预期行为。
+          python setup_db.py --graph
+
+      - name: 校验 schema 落库（扩展 / 表 / HNSW 索引 / 维度）
+        run: python scripts/check_pg.py schema
+
+      - name: 完整回归评测跑在 PG 上（读写走 pgvector）
+        run: |
+          python eval_run.py
+          python scripts/check_baseline.py
+
+      - name: 校验数据确实写入 PG（防止静默退回 memory）
+        run: python scripts/check_pg.py data
+
