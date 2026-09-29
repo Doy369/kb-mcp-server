@@ -29,7 +29,7 @@
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**271 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job**
+- **质量保障（P2-10）**：**282 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
@@ -109,7 +109,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（271 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（282 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1（阈值/报告路径可覆盖）
 │   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
@@ -522,7 +522,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 271 例，离线约 12s
+python -m pytest tests/ -v      # 282 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
@@ -537,9 +537,17 @@ python -m pytest tests/ -v      # 271 例，离线约 12s
 | `test_planner_collaboration.py` | 48 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关 |
 | `test_actions.py` | 53 | 动作参数契约、**确认门**、审计三终态、意图识别与参数抽取、参与闸门、HITL 闭环 |
 | `test_baseline_gate.py` | 11 | **基线校验脚本本身**：阈值覆盖、报告路径三来源、恰好等于阈值放行、低于必红、缺失必失败 |
+| `test_graph_age_cypher.py` | 11 | **AGE `cypher()` 列定义契约**：列数必须等于 `RETURN` 表达式数（多了少了一律报错）。假连接抓 SQL 断言各读接口列数，**不需要真实 PG** |
 
 > `test_baseline_gate.py` 的理由：该脚本**同时把守 `test` 与 `bge` 两个 job**。
 > 参数解析写错时表现不是报错，而是**静默失效**——CI 照样绿，只是不再拦任何东西。
+
+> `test_graph_age_cypher.py` 锁的是一条**只在真机上才暴露**的契约：AGE 的 `cypher()`
+> 返回 `SETOF record`，PostgreSQL 会逐一比对列定义列表与 `RETURN` 表达式数，不符即报
+> `return row and column definition list do not match`。`_cypher()` 曾恒声明单列
+> `(v agtype)`，而 `find_entities` / `neighbors` / `paths` / `export_graph` 都是多列
+> `RETURN`——本地单测（memory 后端）永远走不到，于是「一直没错」；直到 `age` job 在
+> 真实 AGE 上首跑即崩。把契约钉进单测后，任何新接口忘了传 `nout` 都会在本地就红。
 
 > 其中多条用例直接锁住 ROADMAP 记录过的真 bug——**不报错、只是答案悄悄变差**的那类问题，
 > 没有测试就只能靠肉眼发现。
@@ -555,7 +563,7 @@ python -m pytest tests/ -v      # 271 例，离线约 12s
 | `pg` | 推送 / PR | 起真实 PG + pgvector → 建表 → 回归跑在 PG → 校验 schema 与落库数据 | 生产存储路径真通，且**没有静默退回 memory** |
 | `mcp` | 推送 / PR | stdio 子进程 + 官方客户端走完整 JSON-RPC | MCP 是**协议实质**而非标题；动作确认门与审计真落盘 |
 | `load` | 推送 / PR | 真实 HTTP 并发压测（只读 / 混合读写 / 限流门 / 指标自洽） | 并发下**不丢数据、限流精确、零错误** |
-| `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
+| `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → **AGE 语法能力探针**（含多列 `RETURN` 列数契约）→ 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
 | `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
 评测报告作为 artifact 归档 30 天；`load` / `age` 的报告同样归档。

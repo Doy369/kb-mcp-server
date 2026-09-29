@@ -474,8 +474,11 @@ class AGEGraphStore(GraphStore):
       SET search_path = ag_catalog, "$user", public;
       SELECT create_graph('kb_graph');
 
-    注意：AGE 的 cypher() 在不同版本对参数绑定的支持不一致，实现里统一做标识符转义，
-    生产启用前请在目标 AGE 版本上跑一遍 demo_graph.py --backend age 验证。
+    注意：AGE 的 cypher() 在不同版本对参数绑定与子句的支持不一致；`_cypher()` 统一做
+    标识符转义，并把 **RETURN 列数**（`nout`）显式对齐——AGE 的列定义列表必须与
+    RETURN 表达式数逐一相等，否则 PostgreSQL 报 `return row and column definition list
+    do not match`。本后端的真机验证由 CI `age` job（`scripts/check_age.py`）承担，
+    覆盖：扩展/建图/不静默降级/语法探针/真实摄取写入/原始表对账/读回/清理。
     """
 
     backend = "age"
@@ -517,12 +520,27 @@ class AGEGraphStore(GraphStore):
                 pass
 
     # ---- Cypher 执行 ----
-    def _cypher(self, query: str, params: tuple = ()) -> list[tuple]:
+    def _cypher(self, query: str, params: tuple = (), nout: int = 1) -> list[tuple]:
+        """执行 Cypher，返回行元组。
+
+        `nout` = Cypher `RETURN` 表达式的个数，**必须与实际返回列数逐一对齐**：
+        AGE 的 `cypher()` 返回 SETOF record，PostgreSQL 会拿列定义列表跟实际返回列数
+        做比对，数量不符即报 `return row and column definition list do not match`
+        （见 stackoverflow.com/q/76083218）。此前这里恒声明单列 `(v agtype)`，
+        于是所有多列 RETURN 的读接口（find_entities / neighbors / paths / export_graph）
+        在真实 AGE 上必然报错——这正是「代码写了但从未真跑过」的典型后果。
+
+        终止型语句（DELETE / DETACH DELETE，无 RETURN）按官方手册
+        （age-manual: terminal DELETE clauses）**仍需声明一列**，只是该列返回 0 行，
+        故 nout 下限取 1。
+        """
         assert self.conn is not None
+        nout = max(1, int(nout))
+        cols = ", ".join(f"c{i} agtype" for i in range(nout))
         sql = (
             "SELECT * FROM ag_catalog.cypher(%s, %s"
             + (", %s" if params else "")
-            + ") as (v agtype);"
+            + f") as ({cols});"
         )
         args = (self.graph_name, query) + (tuple(params),) if params else (self.graph_name, query)
         with self.conn.cursor() as cur:
@@ -561,7 +579,7 @@ class AGEGraphStore(GraphStore):
         label = f":{node_type}" if node_type else ""
         where = f"WHERE n.name CONTAINS '{self._esc(name)}'" if name else ""
         q = f"MATCH (n{label}) {where} RETURN n.name AS name, labels(n) AS labels, n.props AS props LIMIT {int(limit)}"
-        rows = self._cypher(q)
+        rows = self._cypher(q, nout=3)
         out = []
         for r in rows:
             nm = _age_str(r[0])
@@ -587,7 +605,7 @@ class AGEGraphStore(GraphStore):
             f"MATCH (n{label} {{name: '{self._esc(name)}'}}){arrow}(m) "
             f"RETURN n.name AS src, [e IN r | type(e)] AS rels, m.name AS dst, labels(m) AS labels LIMIT {int(limit)}"
         )
-        rows = self._cypher(q)
+        rows = self._cypher(q, nout=4)
         start = self.find_entities(name=name, node_type=node_type, limit=1)
         nbrs = []
         for r in rows:
@@ -616,7 +634,7 @@ class AGEGraphStore(GraphStore):
             f"MATCH p = (a {{name: '{self._esc(src)}'}})-[*1..{max_depth}]-(b {{name: '{self._esc(dst)}'}}) "
             f"RETURN [n IN nodes(p) | n.name] AS names, [r IN relationships(p) | type(r)] AS rels LIMIT {int(limit)}"
         )
-        rows = self._cypher(q)
+        rows = self._cypher(q, nout=2)
         out = []
         for r in rows:
             names = _age_list(r[0]) or []
@@ -650,7 +668,7 @@ class AGEGraphStore(GraphStore):
             "MATCH (n)-[r]->(m) "
             "RETURN n.name AS sn, labels(n) AS sl, type(r) AS rel, m.name AS mn, labels(m) AS ml"
         )
-        rows = self._cypher(q)
+        rows = self._cypher(q, nout=5)
         nodes: dict[str, dict] = {}
         edges: list[dict] = []
         for r in rows:
