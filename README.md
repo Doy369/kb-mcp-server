@@ -29,11 +29,14 @@
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**260 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 四 job**
+- **质量保障（P2-10）**：**271 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job**
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
-  ④ 真实 MCP 协议：stdio 子进程 + 客户端握手 → 工具调用 → 动作确认门与审计。
+  ④ 真实 MCP 协议：stdio 子进程 + 客户端握手 → 工具调用 → 动作确认门与审计；
+  ⑤ **负载测试**：真实 HTTP 并发，断言零错误 / 并发写入不丢数据 / 限流精确 / 指标自洽；
+  ⑥ **真实 Apache AGE**：扩展 → 建图 → 不静默降级 → 真实摄取写入 → 原始 `ag_catalog` 表对账；
+  ⑦ **真实 bge 嵌入**（夜间 + 手动，阈值 0.95）——保「质量上限」，不拖慢每次推送。
 - **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
   （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
 
@@ -106,13 +109,15 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（260 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（271 例，离线零依赖，见 tests/README.md）
 ├── scripts/
-│   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1
+│   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1（阈值/报告路径可覆盖）
 │   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
 │   ├── check_mcp.py        # P2-9 真实 MCP 协议端到端（stdio 子进程 + 官方客户端）
+│   ├── check_load.py       # P2-10 补：真实 HTTP 并发压测（零错误 / 不丢数据 / 限流精确）
+│   ├── check_age.py        # P2-10 补：真实 Apache AGE 图侧（扩展/建图/不降级/原始表对账）
 │   └── verify_collaboration.py  # P1-4 动态协作真实链路联调
-├── .github/workflows/ci.yml  # CI 四 job：单测+评测+基线 / 容器构建+冒烟 / 真实 PG+pgvector / MCP 协议
+├── .github/workflows/ci.yml  # CI 七 job：单测+评测+基线 / 容器 / PG / MCP / 负载 / AGE / bge(夜间)
 ├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
 ├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
 ├── .dockerignore
@@ -382,7 +387,22 @@ $ python scripts/check_mcp.py     # 真实 stdio 子进程 + 官方 MCP 客户�
 python demo_agents.py                  # 固定流水线协作（只入向量库 → 自动补图 → 多路召回 → 合成）
 python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 协商补轮 / 降级 / 人工介入
 python scripts/check_mcp.py            # P2-9 真实 MCP 协议端到端（握手 / 工具 / 动作确认门 / 审计 / 多 agent）
+python scripts/check_load.py           # P2-10 补：真实 HTTP 并发压测（会临时起 app 子进程）
+python scripts/check_age.py            # P2-10 补：真实 Apache AGE 图侧（需目标 PG 带 age 扩展）
 ```
+
+`check_load.py` 的四个场景与实际断言：
+
+```
+[1] 只读并发        并发 8 发 160 次 /api/ask：~150 req/s，p50 29ms / p95 38–58ms / p99 ~515ms
+[2] 混合读写        并发 40 写 + 80 读：写入成功 40，store 实际 +40（丢失 0）
+[3] 限流门          限流 5/min：并发发 24 次 → 放行 5、限流 19；/healthz 不受限流误伤
+[4] 指标自洽        /api/metrics requests_total 不少于本次发送数
+```
+
+> 压测脚本会启动真实 app 子进程并**强制关闭浏览器自动打开**（`KB_NO_BROWSER=1`）：
+> 浏览器会真的加载控制台页面、打出一串 API 请求，从而**吃掉限流配额并污染指标计数**——
+> 这是实测踩到的坑（限流场景「应放行 5」被观测成「放行 1」），也是 `KB_NO_BROWSER` 存在的理由。
 
 完整演示「知识只入向量库 → GraphBuilder 自动补图 → 多路并行召回 → 合成 → 第二轮秒回」。
 LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，链路照常跑通。
@@ -502,43 +522,59 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 260 例，离线约 12s
+python -m pytest tests/ -v      # 271 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
 
 | 文件 | 例数 | 覆盖重点 |
 |---|---|---|
-| `test_ingestion_storage.py` | 32 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、图谱本体约束 |
+| `test_ingestion_storage.py` | 43 | 分块三要素（标题前缀 / 一行多档拆条 / Q-A 成对）、嵌入单例、存储持久化与容错、图谱本体约束、**PG 懒连接 / 注册时序 / 写库参数适配** |
 | `test_retrieval.py` | 27 | **BM25 分数越界回归护栏**、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | **数字边界断言**（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
-| `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、**降级链路**、合成契约、14 工具注册完整性 |
+| `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、**降级链路**、合成契约、16 工具注册完整性 |
+| `test_adapters_resilience.py` | 29 | 重试次数语义与指数退避封顶、熔断状态机、降级不抛异常、失败不写缓存 |
+| `test_planner_collaboration.py` | 48 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关 |
+| `test_actions.py` | 53 | 动作参数契约、**确认门**、审计三终态、意图识别与参数抽取、参与闸门、HITL 闭环 |
+| `test_baseline_gate.py` | 11 | **基线校验脚本本身**：阈值覆盖、报告路径三来源、恰好等于阈值放行、低于必红、缺失必失败 |
 
-> 其中三条用例直接锁住 ROADMAP 记录过的真 bug——**不报错、只是答案悄悄变差**的那类问题，
+> `test_baseline_gate.py` 的理由：该脚本**同时把守 `test` 与 `bge` 两个 job**。
+> 参数解析写错时表现不是报错，而是**静默失效**——CI 照样绿，只是不再拦任何东西。
+
+> 其中多条用例直接锁住 ROADMAP 记录过的真 bug——**不报错、只是答案悄悄变差**的那类问题，
 > 没有测试就只能靠肉眼发现。
 
 ### CI 流水线
 
-`.github/workflows/ci.yml` 三个并行 job：
+`.github/workflows/ci.yml` 七个 job：
 
-| job | 内容 | 验证什么 |
-|---|---|---|
-| `test` | 单测 → 回归评测 → 基线校验 | 逻辑正确性；通过率低于基线（72%）则**阻断合并** |
-| `docker` | 构建镜像 → 启动 → 健康检查 → 容器内端到端冒烟 | 「镜像能构建」且「容器能跑」（build 成功 ≠ 能跑） |
-| `pg` | 起真实 PG + pgvector → 建表 → 回归跑在 PG → 校验 schema 与落库数据 | 生产存储路径真通，且**没有静默退回 memory** |
+| job | 触发 | 内容 | 验证什么 |
+|---|---|---|---|
+| `test` | 推送 / PR | 单测 → 回归评测 → 基线校验 | 逻辑正确性；通过率低于基线（72%）则**阻断合并** |
+| `docker` | 推送 / PR | 构建镜像 → 启动 → 健康检查 → 容器内端到端冒烟 | 「镜像能构建」且「容器能跑」（build 成功 ≠ 能跑） |
+| `pg` | 推送 / PR | 起真实 PG + pgvector → 建表 → 回归跑在 PG → 校验 schema 与落库数据 | 生产存储路径真通，且**没有静默退回 memory** |
+| `mcp` | 推送 / PR | stdio 子进程 + 官方客户端走完整 JSON-RPC | MCP 是**协议实质**而非标题；动作确认门与审计真落盘 |
+| `load` | 推送 / PR | 真实 HTTP 并发压测（只读 / 混合读写 / 限流门 / 指标自洽） | 并发下**不丢数据、限流精确、零错误** |
+| `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
+| `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
-评测报告作为 artifact 归档 30 天。
+评测报告作为 artifact 归档 30 天；`load` / `age` 的报告同样归档。
 
-**为何 CI 不跑 bge**：dev 嵌入下通过率 91%（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
-受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 100%。
-CI 装 torch + 1.3GB 模型会让单次运行从 11s 涨到数分钟——
-因此 **CI 保「快」与「不许变差」，bge 保「质量上限」（本地验证）**。
+**为何 bge 不跟每次推送**：dev 嵌入下通过率 91%（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
+受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 **100%**。
+装 torch + 下 1.3GB 模型会让单次 CI 从 ~40s 涨到数分钟——高频 job 一旦变慢就会被习惯性忽略。
+所以**职责分离**：推送跑快口径（保「不许变差」），夜间跑重口径（保「质量上限」），
+两者**共用同一份 `check_baseline.py`**，只是阈值与报告路径不同。
 
 ### 本地复现 CI 的基线校验
 
 ```bash
-python eval_run.py              # 产出 eval_report.json
+python eval_run.py                 # 产出 eval_report.json（dev 口径）
 python scripts/check_baseline.py   # 与 CI 同一份逻辑，通过则退出码 0
+
+# bge 口径（报告写独立文件，别覆盖 dev 基线；阈值单独指定）
+python eval_run.py --embedding bge --out eval_report_bge.json
+KB_BASELINE_MIN=0.95 python scripts/check_baseline.py eval_report_bge.json
 ```
 
 ---

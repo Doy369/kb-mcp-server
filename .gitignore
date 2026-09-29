@@ -49,3 +49,14 @@ dist/
 kb-mcp-server.exe
 exe_test.log
 .eval_runtime/
+
+# P2-10 校验脚本产物
+#   · 运行时隔离目录（各脚本独立数据目录，避免互相看到对方的 store）
+#   · 报告不入库：它们记录的是「那一次机器上的数字」，与环境强相关，
+#     入库会让「基线没变差」这件事被无关的机器差异污染；
+#     真正要长期对比的是 eval_report.json（口径固定、可复现）。
+.age_runtime/
+.load_runtime/
+load_report.json
+age_report.json
+eval_report_bge.json

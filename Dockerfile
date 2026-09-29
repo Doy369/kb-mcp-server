@@ -51,6 +51,7 @@ ENV KB_STORAGE_BACKEND=memory \
     KB_API_MOCK=1 \
     KB_LLM_ENABLED=0 \
     KB_DATA_DIR=/app/data \
+    KB_NO_BROWSER=1 \
     PORT=8000
 
 RUN mkdir -p /app/data /app/logs

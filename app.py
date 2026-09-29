@@ -745,9 +745,13 @@ if __name__ == "__main__":
         _alw = [o.strip() for o in _alw_raw.split(",") if o.strip()]
         cors = f" CORS=白名单({len(_alw)}项)" if _alw else " CORS=仅同源"
     print(f"知识库演示控制台已启动: 0.0.0.0:{port}  (后端={settings.storage_backend}, 嵌入={settings.embedding_backend}, LLM合成={'开' if settings.llm_enabled else '关'}{auth}{rl}{cors})")
-    # 一键体验：自动打开默认浏览器
-    try:
-        webbrowser.open(f"http://localhost:{port}")
-    except Exception:
-        pass
+    # 一键体验：自动打开默认浏览器。
+    # headless / CI / 压测下必须能关掉——既因为「打不开浏览器」毫无意义，
+    # 更因为浏览器**真的会加载页面并打出一串 API 请求**（/、/api/status…），
+    # 这些请求会计入限流配额与指标计数，把压测结果和限流断言一起污染。
+    if str(os.getenv("KB_NO_BROWSER", "")).lower() not in ("1", "true", "yes"):
+        try:
+            webbrowser.open(f"http://localhost:{port}")
+        except Exception:
+            pass
     ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()

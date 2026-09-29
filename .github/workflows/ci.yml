@@ -8,6 +8,12 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+  # 夜间跑「重口径」job（bge 真实嵌入：torch + 1.3GB 模型）。
+  # 为什么不让它跟着每次推送跑：单次 CI 会从 ~40s 涨到数分钟，
+  # 高频 job 一旦变慢就会被习惯性忽略 → 质量上限这条线改为低频但必跑。
+  # 19:00 UTC = 次日 03:00 北京时间。
+  schedule:
+    - cron: "0 19 * * *"
 
 jobs:
   test:
@@ -137,7 +143,7 @@ jobs:
         run: docker rm -f kb || true
 
   # ------------------------------------------------------------------ #
-  # 4) MCP 协议：真实 stdio 子进程 + 官方客户端完整握手
+  # 3) MCP 协议：真实 stdio 子进程 + 官方客户端完整握手
   #
   # 为什么需要这一步：此前的「MCP 工具」只被单测**直接 import 函数**调用——
   # 那是函数测试，不是协议验证。「这个 server 能被真实 MCP 客户端连上、
@@ -181,7 +187,7 @@ jobs:
         run: python scripts/check_mcp.py
 
   # ------------------------------------------------------------------ #
-  # 3) 生产存储：真实 Postgres + pgvector
+  # 4) 生产存储：真实 Postgres + pgvector
   #
   # 为什么需要这一步：pgvector 后端长期只做到「代码就位」——从未在真实 PG 上
   # 跑过，因为开发机没有 docker daemon，起不了库。于是「生产存储能通」一直是
@@ -258,4 +264,190 @@ jobs:
 
       - name: 校验数据确实写入 PG（防止静默退回 memory）
         run: python scripts/check_pg.py data
+
+  # ------------------------------------------------------------------ #
+  # 5) 负载测试：真实 HTTP 并发
+  #
+  # 为什么需要这一步：单测与回归评测都是**串行单请求**视角，证明不了
+  # 「并发上来会不会串味 / 会不会丢数据 / 限流计数器会不会漏」。
+  # 服务端是 ThreadingHTTPServer（线程真并发），内存里全是共享可变状态
+  # （store / 限流桶 / 指标计数器）——这正是压测才照得出来的失效面。
+  #
+  # 断言不是「跑完没报错」，而是：零错误 + 响应字段完整 + **并发写入不丢数据**
+  # （上报条数 == store 增量）+ **限流在并发下精确**（恰好放行 N 个）+
+  # 指标计数不少于实际请求数。
+  # ------------------------------------------------------------------ #
+  load:
+    name: 负载测试（真实 HTTP 并发）
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与单测 job 同口径）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: 并发压测（同时起真实 app 子进程）
+        run: python scripts/check_load.py
+
+      - name: 失败时导出报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-report
+          path: load_report.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------ #
+  # 6) 图谱：真实 Apache AGE
+  #
+  # 为什么需要这一步：向量侧的 pgvector 早已在 CI 跑通，**图侧一直是空白**——
+  # `pg` job 用的 pgvector 镜像不含 AGE，`setup_db.py --graph` 会按设计降级成
+  # memory 图。于是 graph.py 里那句「生产启用前请在目标 AGE 版本上跑一遍验证」
+  # 一直没有兑现，「AGE 图能用」始终是未验证假设。
+  #
+  # 这里用官方 `apache/age` 镜像（自带 shared_preload_libraries=age），
+  # 跑 scripts/check_age.py：扩展 / 建图 / **不静默降级** / 真实摄取写入 /
+  # 原始 ag_catalog 表对账 / Cypher 读回 / clear() 全链路。
+  #
+  # 注意本 job **不需要 pgvector**：图存储与向量存储是两套独立连接，
+  # 所以不必为了「同库」去自建一个装两个扩展的镜像（那会让 CI 多花几分钟）。
+  # ------------------------------------------------------------------ #
+  age:
+    name: 图谱（真实 Apache AGE）
+    runs-on: ubuntu-latest
+
+    services:
+      age:
+        image: apache/age:release_PG16_1.6.0
+        env:
+          POSTGRES_USER: kb
+          POSTGRES_PASSWORD: kb
+          POSTGRES_DB: kb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kb -d kb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # connect_timeout：连不上时快速失败，而不是把 job 挂在默认超时上
+      KB_DATABASE_URL: postgresql://kb:kb@localhost:5432/kb?connect_timeout=10
+      KB_GRAPH_BACKEND: age
+      KB_GRAPH_NAME: kb_graph
+      KB_GRAPH_ENABLED: "1"
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与单测 job 同口径 + PG 驱动）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: AGE 图侧真跑（扩展 / 建图 / 不降级 / 写入 / 原始表对账 / 读回 / 清理）
+        run: python scripts/check_age.py
+
+      - name: 失败时导出报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: age-report
+          path: age_report.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------ #
+  # 7) bge 真实嵌入：质量上限（夜间 + 手动，不跟每次推送）
+  #
+  # 为什么单独一个 job 且不在推送时跑：bge 要装 torch + 下 1.3GB 模型，
+  # 单次运行从 ~40s 涨到数分钟。高频 job 一旦变慢就会被习惯性忽略，
+  # 反而比没有更糟。所以职责分离：
+  #   · 推送时跑的快口径（dev 嵌入，阈值 0.72）——保「不许变差」；
+  #   · 夜间的重口径（bge 嵌入，阈值 0.95）——保「质量上限」。
+  # 两者共用 scripts/check_baseline.py，只是 KB_BASELINE_MIN 与报告路径不同。
+  # ------------------------------------------------------------------ #
+  bge:
+    name: bge 真实嵌入（质量上限）
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    env:
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: bge
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+      KB_CHUNK_STRATEGY: fine
+      # 固定缓存位置，配合 actions/cache 免去每次夜跑重下 1.3GB
+      HF_HOME: ${{ github.workspace }}/.hf_cache
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 缓存 HuggingFace 模型（bge-large-zh-v1.5 ≈ 1.3GB）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.hf_cache
+          key: hf-bge-large-zh-v1.5
+
+      - name: 安装依赖（含 torch + sentence-transformers）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf sentence-transformers
+
+      - name: bge 嵌入回归（报告写独立文件，不覆盖 dev 基线报告）
+        run: python eval_run.py --embedding bge --out eval_report_bge.json
+
+      - name: 校验 bge 口径基线（阈值 0.95）
+        run: python scripts/check_baseline.py eval_report_bge.json
+        env:
+          KB_BASELINE_MIN: "0.95"
+          # 报告文件名为 CI 专用，避免与本地评测产物混淆
+          KB_EVAL_REPORT: eval_report_bge.json
+
+      - name: 上传报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report-bge
+          path: eval_report_bge.json
+          retention-days: 30
+          if-no-files-found: warn
+
 
