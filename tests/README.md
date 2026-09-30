@@ -1,14 +1,15 @@
-# tests/ — 自动化测试（286 例，离线零服务依赖）
+# tests/ — 自动化测试（308 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 286 passed，本地约 12s
+python -m pytest tests/ -q      # 308 passed，本地约 12s
 ```
 
 不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
 CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量客户端库**
 （无服务、无 torch），以便单测覆盖存储层真实的类型注册路径；真实 Postgres 的
 端到端验证由 `pg` job 负责，真实 MCP 协议验证由 `mcp` job 负责（`scripts/check_mcp.py`），
-真实并发 HTTP 压测由 `load` job 负责，真实 Apache AGE 图侧由 `age` job 负责，
+真实并发 HTTP 压测由 `load` job 负责，真实 HTTP 往返由 `adapters` job 负责
+（`scripts/check_adapters_live.py`），真实 Apache AGE 图侧由 `age` job 负责，
 真实 bge 嵌入由 `bge` job（夜间 + 手动）负责。
 
 ## 覆盖分层
@@ -19,7 +20,7 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 | `test_retrieval.py` | 27 | BM25 分数越界回归护栏、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | 数字边界断言（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、降级链路、合成契约、16 工具注册完整性 |
-| `test_adapters_resilience.py` | 29 | 重试次数语义与指数退避封顶、熔断状态机（开路/半开/闭合、半开再失败重新计时）、开路期零调用、降级不抛异常、失败不写缓存、降级卡片在归一化/模板/LLM 提示词三处不 KeyError |
+| `test_adapters_resilience.py` | 51 | 重试次数语义与指数退避封顶、熔断状态机（开路/半开/闭合、半开再失败重新计时）、开路期零调用、降级不抛异常、失败不写缓存、降级卡片在归一化/模板/LLM 提示词三处不 KeyError、**可重试性分级**（4xx 除 408/429 不重试且不计熔断、5xx 与传输错误仍重试）、**`not_found` 终态**（404 单发、不计 failures、不开熔断、`probe` 判 ok）、`HTTPStatusError` 转换（非状态类失败原样透传）、`RetryPolicy.call(retryable=)` 三条契约（含默认 `None` 保持旧语义） |
 | `test_planner_collaboration.py` | 48 | P1-4 动态协作：LLM 任务分解（```json 包裹 / 前后噪声 / 幻觉 agent 丢弃 / capability 别名 / 骨架 agent 不入候选）、四条降级路径必回退且不抛异常、协商只提未执行能力（保证收敛）、多轮补轮不重复执行、默认单轮等价旧行为、HITL 开关与挂起、配置容错 |
 | `test_actions.py` | 53 | P2-9 动作型工具：**参数契约**（缺必填/非法枚举一律 rejected）、**确认门**（destructive 未确认绝不执行且不产生 result）、**审计三终态全留痕**（含可关闭）、意图识别与参数抽取（含「订单号里的数字不得被当成金额」回归）、ActionAgent 三道闸（参与闸门 / 意图闸门 / `confirmed` 恒 False）、接入编排（开关 / 轨迹 / 与 HITL 闭环 / 对外契约不变）、合成三终态渲染对未知动作类型安全 |
 | `test_baseline_gate.py` | 11 | `scripts/check_baseline.py`（**同时把守 `test` 与 `bge` 两个 job**）：默认阈值 0.72、`KB_BASELINE_MIN` 覆盖、非法阈值必须炸（不许静默退回默认值）、报告路径三种来源与优先级、相对路径按**仓库根**解析、恰好等于阈值放行、低于阈值必红、报告缺失必失败 |

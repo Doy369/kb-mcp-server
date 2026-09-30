@@ -22,23 +22,29 @@
 - **Web 控制台**：内置前端（`static/index.html`），知识摄取、检索、指标、知识图谱、Agent 协作、接口配置、对话一体。
 - **生产加固（P5）**：可选 Bearer 鉴权、按 IP 限流、结构化访问日志、`/api/metrics` 指标。
 - **实时数据接入韧性（P0-2）**：订单 / 库存适配器统一支持**重试（指数退避）+ 熔断
-  （按后端独立，开路期不发调用）+ 降级**——后端不可用时返回 `degraded` 卡片并在答复中
-  写明「实时数据暂不可用」，问答主链路不中断；`/api/status` 暴露熔断状态与降级计数。
+  （按后端独立，开路期不发调用）+ 降级 + 可重试性分级**——后端不可用时返回 `degraded` 卡片并在
+  答复中写明「实时数据暂不可用」，问答主链路不中断；**4xx（除 408/429）是确定性失败**，
+  不重试、也不计入熔断（否则一个 401 配置错误会把熔断打开、掩盖真因）；
+  `404` 单独判为「查不到」终态，渲染成「未查询到该单号（后端明确返回不存在，非故障）」，
+  与「后端挂了」严格区分；`/api/status` 暴露熔断状态与降级 / 查不到计数。
+  **真实 HTTP 往返**已由 CI `adapters` job 每次推送验证。
 - **多 agent 协作（P7 / P1-4）**：编排器调度多个职责 agent，按问题**动态组队**（LLM 任务分解）、
   证据不足时**多轮协商补人**、需复核时**转人工队列**；全过程留可观测轨迹。
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**286 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job 全绿**
-  （`CI #19` / run `36663136008`）
+- **质量保障（P2-10）**：**308 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 八 job**
+  （七 job 基线：`CI #19` / run `36663136008` 全绿）
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
   ④ 真实 MCP 协议：stdio 子进程 + 客户端握手 → 工具调用 → 动作确认门与审计；
   ⑤ **负载测试**：真实 HTTP 并发，断言零错误 / 并发写入不丢数据 / 限流精确 / 指标自洽；
-  ⑥ **真实 Apache AGE**：扩展 → 建图 → 不静默降级 → **语法能力探针** → 真实摄取写入 →
+  ⑥ **真实 HTTP 往返（实时适配器）**：起真实 socket 替身后端 + 真实 app 子进程，断言
+  重试计数 / 超时受约束 / 熔断后请求数冻结 / 404 与 401 不重试 / 429 重试 / 端到端带出真实后端数据；
+  ⑦ **真实 Apache AGE**：扩展 → 建图 → 不静默降级 → **语法能力探针** → 真实摄取写入 →
   原始 `ag_catalog` 表对账（真跑凭据：7 顶点 / 6 边）；
-  ⑦ **真实 bge 嵌入**（夜间 + 手动，阈值 0.95）——保「质量上限」，不拖慢每次推送。
+  ⑧ **真实 bge 嵌入**（夜间 + 手动，阈值 0.95）——保「质量上限」，不拖慢每次推送。
 - **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
   （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
 
@@ -111,15 +117,16 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（286 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（308 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1（阈值/报告路径可覆盖）
 │   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
 │   ├── check_mcp.py        # P2-9 真实 MCP 协议端到端（stdio 子进程 + 官方客户端）
 │   ├── check_load.py       # P2-10 补：真实 HTTP 并发压测（零错误 / 不丢数据 / 限流精确）
+│   ├── check_adapters_live.py  # P0-2 收尾：真实 HTTP 往返（真实 socket 替身后端，26 项断言）
 │   ├── check_age.py        # P2-10 补：真实 Apache AGE 图侧（扩展/建图/不降级/原始表对账）
 │   └── verify_collaboration.py  # P1-4 动态协作真实链路联调
-├── .github/workflows/ci.yml  # CI 七 job：单测+评测+基线 / 容器 / PG / MCP / 负载 / AGE / bge(夜间)
+├── .github/workflows/ci.yml  # CI 八 job：单测+评测+基线 / 容器 / PG / MCP / 负载 / 适配器 / AGE / bge(夜间)
 ├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
 ├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
 ├── .dockerignore
@@ -524,7 +531,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 286 例，离线约 12s
+python -m pytest tests/ -v      # 308 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
@@ -535,7 +542,7 @@ python -m pytest tests/ -v      # 286 例，离线约 12s
 | `test_retrieval.py` | 27 | **BM25 分数越界回归护栏**、RRF 融合、MMR 去重、硬阈值、分词、余弦边界 |
 | `test_eval_guardrail.py` | 36 | **数字边界断言**（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、**降级链路**、合成契约、16 工具注册完整性 |
-| `test_adapters_resilience.py` | 29 | 重试次数语义与指数退避封顶、熔断状态机、降级不抛异常、失败不写缓存 |
+| `test_adapters_resilience.py` | 51 | 重试次数语义与指数退避封顶、熔断状态机、降级不抛异常、失败不写缓存、**可重试性分级**（4xx 不重试 / 不计熔断）、**`not_found` 终态**与 `HTTPStatusError` 转换 |
 | `test_planner_collaboration.py` | 48 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关 |
 | `test_actions.py` | 53 | 动作参数契约、**确认门**、审计三终态、意图识别与参数抽取、参与闸门、HITL 闭环 |
 | `test_baseline_gate.py` | 11 | **基线校验脚本本身**：阈值覆盖、报告路径三来源、恰好等于阈值放行、低于必红、缺失必失败 |
@@ -557,7 +564,7 @@ python -m pytest tests/ -v      # 286 例，离线约 12s
 
 ### CI 流水线
 
-`.github/workflows/ci.yml` 七个 job：
+`.github/workflows/ci.yml` 八个 job：
 
 | job | 触发 | 内容 | 验证什么 |
 |---|---|---|---|
@@ -566,12 +573,14 @@ python -m pytest tests/ -v      # 286 例，离线约 12s
 | `pg` | 推送 / PR | 起真实 PG + pgvector → 建表 → 回归跑在 PG → 校验 schema 与落库数据 | 生产存储路径真通，且**没有静默退回 memory** |
 | `mcp` | 推送 / PR | stdio 子进程 + 官方客户端走完整 JSON-RPC | MCP 是**协议实质**而非标题；动作确认门与审计真落盘 |
 | `load` | 推送 / PR | 真实 HTTP 并发压测（只读 / 混合读写 / 限流门 / 指标自洽） | 并发下**不丢数据、限流精确、零错误** |
+| `adapters` | 推送 / PR | 起**真实 socket + 真实 HTTP 协议**的本地替身后端，让真实 `urllib` 适配器打过去（26 项断言）+ 真实 app 子进程端到端 | 出站适配层**真能完成一次 HTTP 往返**：重试计数 / 超时受约束 / 熔断后请求数冻结 / 404 与 401 不重试 / 429 重试 |
 | `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → **AGE 语法能力探针**（含多列 `RETURN` 列数契约）→ 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
 | `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
-评测报告作为 artifact 归档 30 天；`load` / `age` 的报告同样归档。
+评测报告作为 artifact 归档 30 天；`load` / `adapters` / `age` 的报告同样归档。
 
-七 job 齐跑实测：**`CI #19` / run `36663136008`，全绿**（`bge` 按 schedule 跳过属正常）。
+七 job 基线实测：**`CI #19` / run `36663136008`，全绿**（`bge` 按 schedule 跳过属正常）；
+后新增 `adapters` job（真实 HTTP 往返）成八 job。
 其中 `age` job 的真跑凭据由 `::notice::` 注解直接可见：`age=1.6.0`，
 顶点 `Document 1 / IssueCategory 3 / SLAClause 2 / Product 1`、
 边 `MENTIONS 3 / GOVERNED_BY 2 / ABOUT_PRODUCT 1`（= 7 顶点 / 6 边，与 `stats()` 口径一致）。
