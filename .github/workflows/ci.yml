@@ -368,7 +368,66 @@ jobs:
           if-no-files-found: warn
 
   # ------------------------------------------------------------------ #
-  # 7) 图谱：真实 Apache AGE
+  # 7) 协作链路：真实 worker（真检索 / 真图谱 / 真适配器 / 真合成）
+  #
+  # 为什么需要这一步：P1-4 的协作层此前只有两类证据——单测（worker 全是替身，
+  # 验证的是「编排逻辑」）与一个**只打印、不断言**的本地脚本。
+  # 于是「协作逻辑接进真实链路后是否真的发生」始终说不清：
+  # 单测证明不了真实 worker 会产出证据，脚本证明不了边界条件。
+  #
+  # 本 job 把 scripts/verify_collaboration.py 变成可断言的 check（28 项）：
+  # 语料真摄取、真向量 + 真 BM25 检索、真图谱、真适配器、真模板合成，
+  # 只有 LLM 换成确定性替身（否则 CI 依赖外部模型，不可复现）。断言覆盖：
+  #   动态分解只叫需要的 agent / 评审发现缺口 → 补轮且**实时数据真进答复** /
+  #   LLM 输出非法 → 回退确定性规划且链路不断 / 护栏未过 → pending_human /
+  #   子任务 depends_on → 同轮内真的分两层 / worker 主动委托 → source=delegation
+  #   且**没证据时明确 declined** / 无主请求当场关账不空转。
+  # 关键：断言的是「分工与账本真的长这样」，而不是「跑完没报错」。
+  # ------------------------------------------------------------------ #
+  collab:
+    name: 协作链路（真实 worker）
+    runs-on: ubuntu-latest
+
+    env:
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+      KB_CHUNK_STRATEGY: fine
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与单测 job 同口径）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: 协作链路联调（真实 worker + 替身 LLM）
+        run: python scripts/verify_collaboration.py
+
+      - name: 失败时导出报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaboration-report
+          path: collaboration_report.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------ #
+  # 8) 图谱：真实 Apache AGE
   #
   # 为什么需要这一步：向量侧的 pgvector 早已在 CI 跑通，**图侧一直是空白**——
   # `pg` job 用的 pgvector 镜像不含 AGE，`setup_db.py --graph` 会按设计降级成
@@ -442,7 +501,7 @@ jobs:
           if-no-files-found: warn
 
   # ------------------------------------------------------------------ #
-  # 8) bge 真实嵌入：质量上限（夜间 + 手动，不跟每次推送）
+  # 9) bge 真实嵌入：质量上限（夜间 + 手动，不跟每次推送）
   #
   # 为什么单独一个 job 且不在推送时跑：bge 要装 torch + 下 1.3GB 模型，
   # 单次运行从 ~40s 涨到数分钟。高频 job 一旦变慢就会被习惯性忽略，

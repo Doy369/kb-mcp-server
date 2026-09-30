@@ -66,3 +66,7 @@ eval_report_bge.json
 #   · 报告不入库（同 load/age 口径：记录的是「那一次机器上的数字」）
 .adapters_live_runtime/
 adapters_live_report.json
+
+# P1-4 收尾：协作链路联调脚本产物（同上，报告只作 CI artifact）
+.collab_runtime/
+collaboration_report.json
