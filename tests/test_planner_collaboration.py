@@ -31,9 +31,13 @@ from kb_mcp_server.extensions import (
 # 替身
 # --------------------------------------------------------------------------- #
 class _StubAgent(BaseAgent):
-    """可观测行为的替身 agent：记录调用次数，按 sink 往黑板上写指定产出。"""
+    """可观测行为的替身 agent：记录调用次数，按 sink 往黑板上写指定产出。
 
-    def __init__(self, name, caps, sink=None, fail=False):
+    `on_run` 是 P1-4 收尾新加的钩子：让替身在执行**过程中**做点什么
+    （例如主动委托 `ctx.request_help(...)`），而不是只能事后写黑板。
+    """
+
+    def __init__(self, name, caps, sink=None, fail=False, on_run=None):
         self.name = name
         self.role = name
         self.description = f"{name}（替身）"
@@ -41,11 +45,14 @@ class _StubAgent(BaseAgent):
         self.calls = 0
         self._sink = sink
         self._fail = fail
+        self._on_run = on_run
 
     def run(self, ctx):
         self.calls += 1
         if self._fail:
             raise RuntimeError("替身故意失败")
+        if self._on_run:
+            self._on_run(ctx)
         if self._sink:
             self._sink(ctx)
         return AgentResult(agent=self.name, role=self.role, summary=f"{self.name} done")
@@ -556,3 +563,292 @@ class TestPlannerSelection:
         r = _retriever()
         reg = AgentRegistry([r])
         assert reg.get("Retriever") is r and reg.all() == [r]
+
+
+# --------------------------------------------------------------------------- #
+# P1-4 收尾 · 子任务依赖编排（Subtask.depends_on 真正被消费）
+# --------------------------------------------------------------------------- #
+class TestDependencyLayering:
+    """一层 = 一次并行。分层只在**真的声明了依赖**时出现。"""
+
+    def test_no_deps_stays_single_layer(self):
+        """向后兼容的硬前提：无依赖时轨迹形状与旧版逐字一致。"""
+        r, g, l = _retriever(), _graph_reasoner(), _live()
+        o = _orch(_ListPlanner(
+            [r, g, l],
+            subtasks=[Subtask("Retriever", "retrieval"), Subtask("GraphReasoner", "graph"),
+                      Subtask("LiveData", "live")]), r, g, l)
+        rec = o.ask("退货政策")["collaboration"]["rounds"][0]
+        assert rec["agents"] == ["Retriever", "GraphReasoner", "LiveData"]
+        assert "layers" not in rec, "无依赖不应出现分层字段"
+        assert "dep_cycles" not in rec
+
+    def test_depends_on_splits_into_layers_and_orders_execution(self):
+        """B 依赖 A → 两层，A 必须先跑完（同层才并行）。"""
+        timeline: list[str] = []
+        r = _StubAgent("Retriever", ["retrieval"],
+                       sink=lambda c: (timeline.append("Retriever"),
+                                       c.hits.extend([{"doc_id": "d", "content": "x", "score": .9}])))
+        l = _StubAgent("LiveData", ["live"],
+                       sink=lambda c: timeline.append("LiveData"))
+        o = _orch(_ListPlanner(
+            [r, l],
+            subtasks=[Subtask("Retriever", "retrieval"),
+                      Subtask("LiveData", "live", depends_on=["Retriever"])]), r, live_data=l)
+        rec = o.ask("订单到哪了")["collaboration"]["rounds"][0]
+        assert rec["layers"] == [["Retriever"], ["LiveData"]]
+        assert timeline == ["Retriever", "LiveData"], "下游必须在依赖跑完之后才执行"
+        assert rec["agents"] == ["Retriever", "LiveData"], "扁平化顺序 = 计划顺序"
+
+    def test_independent_subtasks_stay_in_one_layer(self):
+        """只给其中一个声明依赖时，另一个仍与上游同层并行。"""
+        timeline: list[str] = []
+        r = _StubAgent("Retriever", ["retrieval"], sink=lambda c: timeline.append("R"))
+        g = _StubAgent("GraphReasoner", ["graph"], sink=lambda c: timeline.append("G"))
+        l = _StubAgent("LiveData", ["live"], sink=lambda c: timeline.append("L"))
+        o = _orch(_ListPlanner(
+            [r, g, l],
+            subtasks=[Subtask("Retriever", "retrieval"),
+                      Subtask("GraphReasoner", "graph"),
+                      Subtask("LiveData", "live", depends_on=["Retriever"])]),
+            r, g, l)
+        rec = o.ask("退货政策")["collaboration"]["rounds"][0]
+        assert rec["layers"] == [["Retriever", "GraphReasoner"], ["LiveData"]]
+        assert timeline.index("L") > timeline.index("R")
+        assert timeline.index("L") > timeline.index("G")
+
+    def test_dependency_outside_round_is_treated_as_satisfied(self):
+        """依赖指向本轮未入选的 agent → 视为已满足，绝不能因此永不执行。"""
+        r = _retriever()
+        l = _live()
+        o = _orch(_ListPlanner(
+            [r, l],
+            subtasks=[Subtask("Retriever", "retrieval"),
+                      Subtask("LiveData", "live", depends_on=["GraphReasoner"])]),
+            r, live_data=l)
+        rec = o.ask("退货政策")["collaboration"]["rounds"][0]
+        assert rec["agents"] == ["Retriever", "LiveData"]
+        assert "layers" not in rec
+
+    def test_self_dependency_is_ignored(self):
+        r = _retriever()
+        o = _orch(_ListPlanner([r], subtasks=[Subtask("Retriever", "retrieval",
+                                                      depends_on=["Retriever"])]), r)
+        rec = o.ask("退货政策")["collaboration"]["rounds"][0]
+        assert rec["agents"] == ["Retriever"] and "dep_cycles" not in rec
+
+    def test_cycle_degrades_to_single_layer_without_hanging(self):
+        """成环 → 不做部分重排，整层照跑并留痕。卡死比顺序偏差严重得多。"""
+        r = _retriever()
+        l = _live()
+        o = _orch(_ListPlanner(
+            [r, l],
+            subtasks=[Subtask("Retriever", "retrieval", depends_on=["LiveData"]),
+                      Subtask("LiveData", "live", depends_on=["Retriever"])]), r, live_data=l)
+        out = o.ask("退货政策")
+        rec = out["collaboration"]["rounds"][0]
+        assert rec["dep_cycles"] == ["LiveData", "Retriever"]
+        assert "layers" not in rec, "成环时不冒充分层结果"
+        assert sorted(rec["agents"]) == ["LiveData", "Retriever"]
+        assert out["answer"], "成环也必须出答复（降级不阻断）"
+
+
+class TestLLMPlannerDependsOn:
+    """LLM 分解出的依赖同样要过解析——拼错的名字不能让编排器永远等下去。"""
+
+    def _planner(self, raw):
+        reg = _registry(_retriever(), _graph_reasoner(), _live())
+        return _planner_with(reg, llm=lambda p: raw), reg
+
+    def test_parses_depends_on(self):
+        p, _ = self._planner(
+            '{"subtasks":[{"agent":"Retriever","reason":"先检索"},'
+            '{"agent":"LiveData","reason":"再查实时","depends_on":["Retriever"]}]}')
+        subs = p.strategize(AgentContext(question="订单到哪了")).subtasks
+        assert [s.agent for s in subs] == ["Retriever", "LiveData"]
+        assert subs[1].depends_on == ["Retriever"]
+
+    def test_drops_dependency_on_unpicked_agent(self):
+        """依赖了没入选（或根本不存在）的 agent → 丢弃该依赖，而不是留个死等。"""
+        p, _ = self._planner(
+            '{"subtasks":[{"agent":"LiveData","reason":"查实时",'
+            '"depends_on":["Synthesizer","不存在的Agent"]}]}')
+        subs = p.strategize(AgentContext(question="订单到哪了")).subtasks
+        assert subs[0].depends_on == []
+
+    def test_drops_self_dependency(self):
+        p, _ = self._planner(
+            '{"subtasks":[{"agent":"Retriever","reason":"检索","depends_on":["Retriever"]}]}')
+        subs = p.strategize(AgentContext(question="退货政策")).subtasks
+        assert subs[0].depends_on == []
+
+    def test_depends_on_can_be_capability_alias(self):
+        p, _ = self._planner(
+            '{"subtasks":[{"agent":"Retriever","reason":"检索"},'
+            '{"agent":"LiveData","reason":"实时","depends_on":["retrieval"]}]}')
+        subs = p.strategize(AgentContext(question="订单到哪了")).subtasks
+        assert subs[1].depends_on == ["Retriever"]
+
+    def test_prompt_mentions_depends_on_and_parallel_warning(self):
+        p, _ = self._planner("{}")
+        prompt = p._prompt(AgentContext(question="订单到哪了"), p._candidates())
+        assert "depends_on" in prompt
+        assert "并行" in prompt, "必须提醒 LLM：无依赖就别填，否则会把并行拖成串行"
+
+
+# --------------------------------------------------------------------------- #
+# P1-4 收尾 · 双向消息协商（请求 / 应答账本）
+# --------------------------------------------------------------------------- #
+class TestNegotiationLedger:
+    """黑板上的请求/应答账本是「双向」的载体，形状稳定才能被前端与审计消费。"""
+
+    def test_ledger_helpers(self):
+        ctx = AgentContext(question="q")
+        rid = ctx.request_help("Retriever", "live", ask="要实时状态", reason="订单实体")
+        assert rid == "req-1"
+        assert ctx.open_requests() == [ctx.negotiation[0]]
+        assert ctx.replies() == {}
+
+        ctx.reply(rid, "LiveData", status="provided", note="已产出")
+        assert ctx.open_requests() == []
+        assert ctx.replies()[rid]["status"] == "provided"
+
+    def test_agent_wrappers_use_self_name(self):
+        a = _StubAgent("Retriever", ["retrieval"])
+        ctx = AgentContext(question="q")
+        rid = a.request_help(ctx, "live", ask="x")
+        assert ctx.negotiation[0]["by"] == "Retriever"
+        a.reply_to(ctx, rid, status="declined", note="做不了")
+        assert ctx.replies()[rid]["by"] == "Retriever"
+        assert ctx.replies()[rid]["status"] == "declined"
+
+    def test_request_ids_are_unique(self):
+        ctx = AgentContext(question="q")
+        ids = [ctx.request_help("A", c) for c in ("x", "y", "z")]
+        assert len(set(ids)) == 3
+
+    def test_no_ledger_when_nothing_negotiated(self):
+        """默认单轮、无人请求时不该给轨迹添字段。"""
+        r = _retriever()
+        out = _orch(_ListPlanner([r]), r).ask("退货政策")
+        assert "negotiation" not in out["collaboration"]
+
+    def test_critique_to_dict_omits_empty_requests(self):
+        """既有断言用**精确相等**比较 to_dict()，空值必须不出现。"""
+        assert "requests" not in Critique(need_more=True, missing=["live"]).to_dict()
+        d = Critique(need_more=True, missing=["live"],
+                     requests=[{"by": "EvidenceCritic", "capability": "live"}]).to_dict()
+        assert d["requests"][0]["capability"] == "live"
+
+    def test_critic_emits_requests_for_missing_caps(self):
+        c = EvidenceCritic().review(AgentContext(question="退货政策是什么"), done_caps=set())
+        assert c.missing == ["retrieval"]
+        assert [r["capability"] for r in c.requests] == ["retrieval"]
+        assert c.requests[0]["by"] == "EvidenceCritic"
+
+    def test_critic_honours_declined(self):
+        """被明确拒绝过的能力，评审不再索要。"""
+        c = EvidenceCritic().review(AgentContext(question="退货政策是什么"),
+                                    done_caps=set(), declined={"retrieval"})
+        assert not c.need_more and c.missing == [] and c.requests == []
+
+
+class TestBidirectionalNegotiation:
+    """「评审点名 → agent 被静默跑一遍」升级为「请求 → 应答（含明确拒绝）」。"""
+
+    def test_worker_can_delegate_to_peer(self, cfg):
+        """worker 主动委托 → 补轮 source=delegation（不是评审点名）。"""
+        cfg(KB_AGENT_MAX_ROUNDS=3)
+        cfg(KB_AGENT_PLANNER="deterministic")
+        r = _StubAgent(
+            "Retriever", ["retrieval", "semantic"],
+            sink=lambda c: c.hits.append({"doc_id": "d", "content": "x", "score": .9}),
+            on_run=lambda c: c.request_help("Retriever", "live", ask="订单实体需要实时状态"))
+        l = _live()
+        o = _orch(_ListPlanner([r]), r, live_data=l)
+        out = o.ask("退货政策")          # 问题不含实时诉求 → 评审不会点名 live
+        coll = out["collaboration"]
+        assert [x["source"] for x in coll["rounds"]] == ["deterministic", "delegation"]
+        assert coll["rounds"][1]["agents"] == ["LiveData"]
+        assert coll["negotiation"]["delegated"] is True
+        led = coll["negotiation"]["ledger"]
+        assert led[0] == {"kind": "request", "id": "req-1", "by": "Retriever",
+                          "capability": "live", "ask": "订单实体需要实时状态", "reason": ""}
+        assert led[1]["by"] == "LiveData" and led[1]["status"] == "provided"
+        assert "live" not in coll["negotiation"]["declined"]
+
+    def test_unproductive_agent_is_recorded_as_declined(self, cfg):
+        """跑完仍无证据 → 明确 declined，而不是把沉默当「已尽力」。"""
+        cfg(KB_AGENT_MAX_ROUNDS=5)
+        g = _graph_reasoner(facts=None)
+        o = _orch(_ListPlanner([g]), _retriever(hits=[]), g, _live(cards=[]),
+                  critic=EvidenceCritic())
+        out = o.ask("我的订单到哪了？")
+        coll = out["collaboration"]
+        assert len(coll["rounds"]) == 2, f"应一轮补轮后收束：{coll['rounds']}"
+        statuses = {r["id"]: r["status"] for r in coll["rounds"][1]["replies"]}
+        assert set(statuses.values()) == {"declined"}
+        assert coll["negotiation"]["declined"] == ["live", "retrieval"]
+
+    def test_request_for_unowned_capability_is_closed(self, cfg):
+        """请求共同体里没有的能力 → 当场关账，不产生空转补轮。"""
+        cfg(KB_AGENT_MAX_ROUNDS=4)
+        r = _StubAgent("Retriever", ["retrieval"],
+                       sink=lambda c: c.hits.append({"doc_id": "d", "content": "x", "score": .9}),
+                       on_run=lambda c: c.request_help("Retriever", "quantum-teleport"))
+        o = _orch(_ListPlanner([r]), r)
+        out = o.ask("退货政策")
+        coll = out["collaboration"]
+        assert len(coll["rounds"]) == 1, "无主的请求不该再多跑一轮"
+        led = coll["negotiation"]["ledger"]
+        assert [e["status"] for e in led if e["kind"] == "reply"] == ["unavailable"]
+        assert coll["negotiation"]["declined"] == ["quantum-teleport"]
+
+    def test_request_for_already_executed_agent_is_not_rerun(self, cfg):
+        """已经跑过的成员不再重复执行——同一 agent 每次问答只跑一次。"""
+        cfg(KB_AGENT_MAX_ROUNDS=4)
+        r = _StubAgent("Retriever", ["retrieval"],
+                       sink=lambda c: c.hits.append({"doc_id": "d", "content": "x", "score": .9}),
+                       on_run=lambda c: c.request_help("Retriever", "retrieval"))
+        o = _orch(_ListPlanner([r]), r)
+        out = o.ask("退货政策")
+        assert r.calls == 1
+        assert len(out["collaboration"]["rounds"]) == 1
+
+    def test_explicit_reply_from_agent_is_respected(self, cfg):
+        """agent 自己应答过就用它的（包括主动 declined），编排器不覆盖。"""
+        cfg(KB_AGENT_MAX_ROUNDS=3)
+        def _run(c):
+            rid = c.open_requests()[0]["id"] if c.open_requests() else None
+            if rid:
+                c.reply(rid, "LiveData", status="declined", note="上游限流，本轮拿不到")
+        r = _StubAgent("Retriever", ["retrieval"],
+                       sink=lambda c: c.hits.append({"doc_id": "d", "content": "x", "score": .9}),
+                       on_run=lambda c: c.request_help("Retriever", "live"))
+        l = _StubAgent("LiveData", ["live"],
+                       sink=lambda c: c.live.append({"type": "order"}), on_run=_run)
+        o = _orch(_ListPlanner([r]), r, live_data=l)
+        out = o.ask("退货政策")
+        replies = out["collaboration"]["rounds"][1]["replies"]
+        assert replies[0]["status"] == "declined"
+        assert replies[0]["note"] == "上游限流，本轮拿不到"
+        assert "live" in out["collaboration"]["negotiation"]["declined"]
+
+    def test_negotiation_is_bounded_by_round_cap(self, cfg):
+        """每轮都有人提新请求也必须被轮次上限兜住（不许无限协商）。"""
+        cfg(KB_AGENT_MAX_ROUNDS=2)
+        r = _StubAgent("Retriever", ["retrieval"],
+                       sink=lambda c: c.hits.append({"doc_id": "d", "content": "x", "score": .9}),
+                       on_run=lambda c: c.request_help("Retriever", "live"))
+        l = _StubAgent("LiveData", ["live"],
+                       sink=lambda c: c.live.append({"type": "order"}),
+                       on_run=lambda c: c.request_help("LiveData", "graph"))
+        o = _orch(_ListPlanner([r]), r, _graph_reasoner(), l)
+        out = o.ask("退货政策")
+        assert len(out["collaboration"]["rounds"]) == 2
+        led = out["collaboration"]["negotiation"]["ledger"]
+        assert all(e["kind"] in ("request", "reply") for e in led)
+        # 账本里不留悬空请求
+        ans = {e["id"] for e in led if e["kind"] == "reply"}
+        assert all(e["id"] in ans for e in led if e["kind"] == "request")
+

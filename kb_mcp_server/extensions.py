@@ -291,10 +291,14 @@ class LLMPlanner(Planner):
             "你是客服问答系统的任务规划器。请判断回答下面这个问题需要哪些能力，"
             "从清单中选出**确实需要**参与的 agent（可多选，也可只选一个），"
             "并为每个入选 agent 写一句理由。只输出 JSON，不要任何解释：\n"
-            '{"subtasks":[{"agent":"清单中的名字","reason":"为什么需要它"}],'
+            '{"subtasks":[{"agent":"清单中的名字","reason":"为什么需要它",'
+            '"depends_on":["必须先跑完的 agent 名字（可选）"]}],'
             '"reason":"整体分工思路"}\n'
             "约束：agent 必须是清单中的名字；不需要的能力不要叫（宁缺毋滥）；"
-            "纯知识问答至少需要负责语义检索的 agent。\n\n"
+            "纯知识问答至少需要负责语义检索的 agent。\n"
+            "depends_on 仅在**真的需要先后顺序**时才填（例如必须先检索到实体、"
+            "才能按实体去查图谱或实时数据）；彼此无依赖就**不要填**——"
+            "无依赖的 agent 会并行执行，填错会把本可并行的步骤串起来变慢。\n\n"
             f"可选 agent：\n{self._roster(cands)}\n\n"
             f"用户问题：{ctx.question}\nJSON："
         )
@@ -303,6 +307,8 @@ class LLMPlanner(Planner):
         """把 LLM 的 JSON 分解结果映射回**真实 agent 实例**。
 
         未知 agent 一律丢弃（不让幻觉进执行链）；允许用 capability 指代 agent。
+        `depends_on` 同样要过一遍解析：**只保留指向本次真正入选 agent 的依赖**，
+        否则一个拼错的依赖名会让编排器永远等一个不存在的上游。
         """
         data = _extract_json(raw)
         if not isinstance(data, dict):
@@ -313,25 +319,45 @@ class LLMPlanner(Planner):
             for c in (getattr(a, "capabilities", None) or []):
                 by_cap.setdefault(str(c).lower(), a)
 
+        def _resolve(token: Any):
+            """把「名字 or 能力」解析成候选内的真实 agent（解析不到返回 None）。"""
+            key = str(token or "").strip().lower()
+            return by_name.get(key) or by_cap.get(key)
+
+        drafted: list[tuple[Any, str, str, list[str]]] = []
         picked: list = []
-        subs: list[Subtask] = []
         seen: set[str] = set()
         for item in (data.get("subtasks") or []):
             if not isinstance(item, dict):
                 continue
-            a = by_name.get(str(item.get("agent", "")).strip().lower())
+            a = _resolve(item.get("agent"))
             if a is None:
-                a = by_cap.get(str(item.get("capability", "")).strip().lower())
+                a = _resolve(item.get("capability"))
             if a is None:
                 continue
             cap = str(item.get("capability", "") or "").strip() or \
                 ((getattr(a, "capabilities", None) or [""])[0])
-            subs.append(Subtask(agent=a.name, capability=cap,
-                                reason=str(item.get("reason", "") or "")[:200]))
+            raw_deps = item.get("depends_on")
+            deps: list[str] = []
+            if isinstance(raw_deps, list):
+                for d in raw_deps:
+                    dep = _resolve(d)
+                    # 只认「本次入选」的 agent，且不认自己（自依赖会让分层陷入环）
+                    if dep is not None and dep.name != a.name:
+                        deps.append(dep.name)
+            drafted.append((a, cap, str(item.get("reason", "") or "")[:200], deps))
             if a.name not in seen:
                 seen.add(a.name)
                 picked.append(a)
+
+        # 第二遍：依赖必须落在最终入选集合里（D 依赖了被丢弃的 agent → 视为无约束）
+        chosen = {getattr(a, "name", "") for a in picked}
+        subs: list[Subtask] = []
+        for a, cap, reason, deps in drafted:
+            subs.append(Subtask(agent=a.name, capability=cap, reason=reason,
+                                depends_on=[d for d in deps if d in chosen]))
         return picked, subs, str(data.get("reason", "") or "")[:300]
+
 
     def _fallback_to(self, ctx: AgentContext, why: str, raw: str = "") -> PlanResult:
         res = self._fallback.strategize(ctx)
@@ -346,16 +372,26 @@ class LLMPlanner(Planner):
 # ---------------------------------------------------------------------------
 @dataclass
 class Critique:
-    """一轮协作后对「证据够不够」的评审结论（协商的输入）。"""
+    """一轮协作后对「证据够不够」的评审结论（协商的输入）。
+
+    P1-4 收尾起，评审不再只是「一个缺口清单」，而是**可应答的请求**：
+    `requests` 里每条都带 `by`（谁提的）与 `capability`（要谁答），
+    被点名的 agent 可以明确 **provided / declined**——单向点名变成双向协商。
+    """
 
     need_more: bool = False
     missing: list[str] = field(default_factory=list)   # 缺失的 capability
     reason: str = ""
     source: str = "deterministic"
+    requests: list[dict] = field(default_factory=list)  # P1-4 收尾：可应答的缺口请求
 
     def to_dict(self) -> dict:
-        return {"need_more": self.need_more, "missing": list(self.missing),
-                "reason": self.reason, "source": self.source}
+        out = {"need_more": self.need_more, "missing": list(self.missing),
+               "reason": self.reason, "source": self.source}
+        # 与 Subtask.depends_on 同策略：空值不出现，既有断言（精确比较）不受影响。
+        if self.requests:
+            out["requests"] = [dict(r) for r in self.requests]
+        return out
 
 
 class EvidenceCritic:
@@ -366,28 +402,43 @@ class EvidenceCritic:
 
     判定为**确定性规则**（不依赖 LLM）：可解释、零额外 token、离线可测。
     只提「尚未执行过」的能力，保证补轮必然收敛（不会反复叫同一个 agent）。
+
+    P1-4 收尾起，收敛条件收紧为**两条**（不只是「没跑过」）：
+    - 没执行过；且
+    - 没有被别的 agent/评审**明确拒绝**过（`declined`）——
+      「我这边也没有这项能力」是有效信息，重复索要只会空转。
     """
 
     _LIVE_HINTS = ("订单", "物流", "快递", "发货", "到货", "库存", "现货", "有货", "单号", "签收")
     _GRAPH_HINTS = ("关系", "关联", "适用于", "哪条", "多跳", "同一", "根因", "影响", "依赖")
 
-    def review(self, ctx: AgentContext, done_caps: set[str]) -> Critique:
+    def review(self, ctx: AgentContext, done_caps: set[str],
+               declined: set[str] | None = None) -> Critique:
+        declined = declined or set()
         q = ctx.question or ""
         missing: list[str] = []
 
-        if not ctx.hits and "retrieval" not in done_caps:
+        def _want(cap: str) -> bool:
+            return cap not in done_caps and cap not in declined
+
+        if not ctx.hits and _want("retrieval"):
             missing.append("retrieval")
-        if (not (ctx.graph_facts or {}).get("facts") and "graph" not in done_caps
+        if (not (ctx.graph_facts or {}).get("facts") and _want("graph")
                 and any(h in q for h in self._GRAPH_HINTS)):
             missing.append("graph")
         wants_live = bool(ctx.order_id or ctx.sku) or any(h in q for h in self._LIVE_HINTS)
-        if wants_live and not ctx.live and "live" not in done_caps:
+        if wants_live and not ctx.live and _want("live"):
             missing.append("live")
 
         if not missing:
             return Critique(need_more=False, reason="证据已覆盖本次问题所需能力")
+        # 把「缺口」变成「请求」：带发起方与诉求，便于被点名方应答（而非被静默跑一遍）。
+        reqs = [{"by": "EvidenceCritic", "capability": c,
+                 "ask": f"缺少 {c} 证据，请求补查"} for c in missing]
         return Critique(need_more=True, missing=missing,
-                        reason="证据缺口：" + "、".join(missing) + "，请求补查")
+                        reason="证据缺口：" + "、".join(missing) + "，请求补查",
+                        requests=reqs)
+
 
 
 # ---------------------------------------------------------------------------

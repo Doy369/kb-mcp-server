@@ -34,6 +34,46 @@ class AgentContext:
     actions: list[dict] = field(default_factory=list)     # P2-9 ActionAgent 写（含被拒/待确认）
     answer: dict = field(default_factory=dict)            # Synthesizer 写
     data: dict = field(default_factory=dict)              # 编排器用（plan / trace）
+    # P1-4 收尾：协商账本（append-only）。请求与应答都落这里，谁提的、谁答的、
+    # 答的是「我有」还是「我也没有」都可追溯——单向点名变成双向协商。
+    negotiation: list[dict] = field(default_factory=list)
+
+    # ---- P1-4 收尾：双向消息协商（请求 / 应答）----
+    def request_help(self, by: str, capability: str, ask: str = "",
+                     reason: str = "") -> str:
+        """登记一条「需要某项能力」的请求，返回请求 id。
+
+        发起方可以是评审者（critic），也可以是**任何一个 worker**——
+        worker 在执行中发现「我需要实时数据/图谱」时主动委托，比编排器猜更准。
+        只是登记，不动手：调度仍由编排器统一做（否则 agent 之间会互相递归调用）。
+        """
+        rid = f"req-{sum(1 for e in self.negotiation if e.get('kind') == 'request') + 1}"
+        self.negotiation.append({"kind": "request", "id": rid, "by": by,
+                                 "capability": str(capability), "ask": ask,
+                                 "reason": reason})
+        return rid
+
+    def reply(self, rid: str, by: str, status: str = "provided",
+              note: str = "") -> None:
+        """对一条请求作出应答。
+
+        `status`：`provided`（已尽力，产出见黑板）/ `declined`（这项我也做不了）
+        / `unavailable`（共同体里没有谁能做）。**declined 是有效信息**——
+        编排器记住它，就不会再拿同一项能力反复空转。
+        """
+        self.negotiation.append({"kind": "reply", "id": rid, "by": by,
+                                 "status": status, "note": note})
+
+    def replies(self) -> dict[str, dict]:
+        """已应答请求：id -> reply 条目。"""
+        return {e["id"]: e for e in self.negotiation if e.get("kind") == "reply"}
+
+    def open_requests(self) -> list[dict]:
+        """尚未被应答的请求（协商的下一步输入）。"""
+        answered = set(self.replies())
+        return [e for e in self.negotiation
+                if e.get("kind") == "request" and e.get("id") not in answered]
+
 
 
 @dataclass
@@ -84,3 +124,20 @@ class BaseAgent(ABC):
     def card(self) -> dict:
         """agent 能力卡片，供 agent_status 与前端展示。"""
         return {"name": self.name, "role": self.role, "description": self.description}
+
+    # ---- P1-4 收尾：worker 侧的协商便利方法（薄封装，账本仍在黑板上）----
+    def request_help(self, ctx: AgentContext, capability: str, ask: str = "",
+                     reason: str = "") -> str:
+        """执行中主动委托：请求共同体里具备该能力的 agent 参与本轮。
+
+        与「等编排器发现缺口」的区别在于发起方——worker 自己最清楚缺什么
+        （例如检索到的实体需要按关系再查一层）。**只登记不直接调用**，
+        由编排器统一调度，避免 agent 之间递归互调。
+        """
+        return ctx.request_help(self.name, capability, ask=ask, reason=reason)
+
+    def reply_to(self, ctx: AgentContext, rid: str, status: str = "provided",
+                 note: str = "") -> None:
+        """应答一条点名请求。做不了就明确 `declined`——沉默会被当成「已尽力」。"""
+        ctx.reply(rid, self.name, status=status, note=note)
+
