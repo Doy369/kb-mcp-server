@@ -198,6 +198,10 @@ async def main() -> int:
             check(len(recent) >= 4, f"动作审计累计 {len(recent)} 条")
             check(any(r.get("status") == "needs_confirmation" for r in recent),
                   "被拦下的退款同样留痕（合规要求）")
+            # P2-9 收尾：图谱回写的开关与状态必须能从协议层看见（默认关＝False）
+            check("graph_writeback" in (acts2 or {}),
+                  "list_actions 暴露图谱回写开关",
+                  f"graph_writeback={((acts2 or {}).get('graph_writeback'))}")
 
             print("\n=== 7) 多 agent 经 MCP 触发动作（含 HITL 闭环）===")
             multi = payload(await session.call_tool("multi_agent_ask", {

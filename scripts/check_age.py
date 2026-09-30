@@ -339,13 +339,106 @@ def _stage_reconcile(store):
     )
 
     nbr = store.neighbors(DOC_ID, node_type="Document")
-    n_names = [n.get("name") for n in nbr.get("neighbors", [])]
-    check("neighbors 能走通关系", len(n_names) >= 1, f"Document 的邻居：{n_names[:6]}")
+    # 注意 `neighbors()` 的元素是 {"depth", "path": [step...], "node": {...}}：
+    # 节点名在 `node.name`，**不在**顶层 `n["name"]`。早先这里读的是 `n.get("name")`，
+    # 于是 detail 恒为 [None, ...]——断言只剩「数量 ≥ 1」在把关，证据是假的。
+    n_names = [(n.get("node") or {}).get("name") for n in nbr.get("neighbors", [])]
+    check("neighbors 能走通关系", len(n_names) >= 1 and all(n_names),
+          f"Document 的邻居：{n_names[:6]}")
 
     store.clear()
     v2, e2, _ = count_labels(GRAPH)
     check("clear() 后图已清空", v2 == 0 and e2 == 0, f"清空后 {v2} 顶点 / {e2} 边")
     return verts, edges
+
+
+def _stage_action_writeback(store):
+    """P2-9 收尾：真实「动作 → 图谱」回写（执行 → 关系 → 再检索）。
+
+    为什么必须在 AGE 上验：回写内部走 `get_graph_store()`（本 job 里 = 真 AGE），
+    所以这一个阶段同时证明三件事——
+      ① 动作真的执行了；② 结果真的落进 AGE 的 label 表（旁路对账，不信 store 的话）；
+      ③ **关掉开关时一行都不写**（默认等价，而不是「反正也没人会开」）。
+    """
+    from kb_mcp_server.actions import run_action
+    from kb_mcp_server.config import set_cfg
+    from kb_mcp_server.graph import get_graph_store
+
+    try:
+        store.clear()
+        # 动作审计与本次验证无关，关掉以免污染工作区（回写断言看的是图谱，不是审计）
+        set_cfg("KB_ACTION_LOG", "off")
+
+        # ---- ① 开关关闭：动作照常成功，图里零写入 ----
+        set_cfg("KB_ACTION_GRAPH", "0")
+        off = run_action("create_ticket", {"subject": "开关关闭时建的工单", "customer": "ACME"},
+                         actor="age-check")
+        check("关：动作仍执行成功", off.get("status") == "executed", str(off.get("status")))
+        check("关：返回里没有 graph 段（默认等价旧行为）", "graph" not in off,
+              f"keys={sorted(off)}")
+        v0, e0, _ = count_labels(GRAPH)
+        check("关：AGE 里零写入", v0 == 0 and e0 == 0, f"顶点 {v0} / 边 {e0}")
+
+        # ---- ② 开关打开：真写进 AGE ----
+        set_cfg("KB_ACTION_GRAPH", "1")
+        res = run_action("create_ticket",
+                         {"subject": "AGE 回写验证", "priority": "P1", "customer": "ACME"},
+                         actor="age-check", context={"sku": "LM3-ARM"})
+        tid = (res.get("result") or {}).get("ticket_id", "")
+        gfx = res.get("graph") or {}
+        check("开：动作已执行", res.get("status") == "executed", str(res.get("status")))
+        check("开：回写成功且后端是 age（没静默降级）",
+              gfx.get("applied") is True and gfx.get("backend") == "age",
+              json.dumps(gfx, ensure_ascii=False))
+        check("开：节点 key = Ticket:<ticket_id>", gfx.get("node") == f"Ticket:{tid}",
+              str(gfx.get("node")))
+        check("开：写了 2 条关系（客户 + 产品）", gfx.get("triples") == 2,
+              f"triples={gfx.get('triples')}")
+
+        # ---- ③ 旁路对账：直接数 AGE 的 label 表 ----
+        v1, e1, detail = count_labels(GRAPH)
+        FACTS["action_labels"] = detail
+        check("AGE 原始表里有 Ticket 顶点", detail.get("Ticket", {}).get("rows", 0) >= 1,
+              f'kb_graph."Ticket" 行数 = {detail.get("Ticket", {}).get("rows", 0)}')
+        check("AGE 原始表里有 SUBMITTED_BY 边",
+              detail.get("SUBMITTED_BY", {}).get("rows", 0) >= 1,
+              f'kb_graph."SUBMITTED_BY" 行数 = {detail.get("SUBMITTED_BY", {}).get("rows", 0)}')
+        check("AGE 原始表里有 ABOUT_PRODUCT 边",
+              detail.get("ABOUT_PRODUCT", {}).get("rows", 0) >= 1,
+              f'kb_graph."ABOUT_PRODUCT" 行数 = {detail.get("ABOUT_PRODUCT", {}).get("rows", 0)}')
+
+        # props 也要真落库：用独立 Cypher 旁路读回，而不是相信 store 的返回值。
+        # 注意 AGE 后端把属性整体存进**单个 `props` 属性**（JSON 字符串），
+        # 不是摊平成 `t.subject` —— 按 memory 的形状去读会拿到 null 而误判「没写进去」。
+        prop_rows = raw(cypher_sql(
+            GRAPH, f"MATCH (t:Ticket {{name: '{tid}'}}) RETURN t.props AS p", "p agtype"))
+        check("Ticket 顶点的 props 真的落库（可读回 subject）",
+              bool(prop_rows) and "AGE 回写验证" in str(prop_rows[0][0]),
+              f"cypher 读回 = {_oneline(prop_rows[0][0]) if prop_rows else '空'}")
+
+        # ---- ④ 再检索：从客户反向走回工单 ----
+        fresh = get_graph_store()
+        found = fresh.find_entities(name=tid, node_type="Ticket", limit=5)
+        check("再检索：find_entities 按 ticket_id 命中",
+              any(e.get("name") == tid for e in found), f"命中 {len(found)} 条")
+
+        # 边方向是 Ticket → Customer，所以从客户出发必须 direction="both"；
+        # 用默认 "out" 会静默返回空列表——「不报错、答案悄悄变错」的典型。
+        back_out = fresh.neighbors("ACME", node_type="Customer", direction="out") or {}
+        back_both = fresh.neighbors("ACME", node_type="Customer", direction="both") or {}
+        b_names = [(n.get("node") or {}).get("name") for n in back_both.get("neighbors", [])]
+        check("再检索：从客户反查得到该工单（direction=both）", tid in b_names,
+              f"both → {b_names[:5]}")
+        check("再检索：direction=out 查不到（方向语义如文档所述，不是坏掉）",
+              back_out.get("neighbors") == [], f"out → {len(back_out.get('neighbors', []))} 条")
+    finally:
+        # 恢复现场：运行时配置不留痕、图不留脏数据（后面还有报告要写）
+        set_cfg("KB_ACTION_GRAPH", "")
+        set_cfg("KB_ACTION_LOG", "")
+        try:
+            store.clear()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _write_report(failed: list[str]) -> None:
@@ -359,6 +452,7 @@ def _write_report(failed: list[str]) -> None:
         "failures": failed,
         "checks": [{"name": n, "ok": ok, "detail": d} for n, ok, d in CHECKS],
         "labels": FACTS.get("labels", {}),
+        "action_labels": FACTS.get("action_labels", {}),
     }
     rp = os.path.join(_HERE, "age_report.json")
     try:
@@ -387,6 +481,8 @@ def main() -> int:
             phase("阶段四：写入原语", lambda: _stage_primitives(store))
             phase("阶段五：真实摄取链路", lambda: _stage_real_pipeline(store))
             phase("阶段六：原始表对账与读回", lambda: _stage_reconcile(store))
+            phase("阶段七：动作回写（执行 → 关系 → 再检索）",
+                  lambda: _stage_action_writeback(store))
     except BaseException as e:  # noqa: BLE001  兜底：报告必须产出
         check("整体执行", False, f"{type(e).__name__}: {e}")
         traceback.print_exc()
@@ -401,6 +497,9 @@ def main() -> int:
     if FACTS.get("labels"):
         gha("notice", "AGE 原始表计数（真跑凭据）",
             f"age={FACTS.get('age_version')} " + json.dumps(FACTS["labels"], ensure_ascii=False))
+    if FACTS.get("action_labels"):
+        gha("notice", "动作回写后的 label 计数（真跑凭据）",
+            json.dumps(FACTS["action_labels"], ensure_ascii=False))
 
     print("-" * 68)
     if failed:
