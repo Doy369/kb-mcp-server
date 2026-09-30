@@ -33,8 +33,9 @@
   （请求 / 应答账本，沉默不算数）、需复核时**转人工队列**；全过程留可观测轨迹。
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
+  执行结果可**回写知识图谱**（`KB_ACTION_GRAPH`），打通「执行 → 关系 → 再检索」；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**332 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 九 job 全绿**
+- **质量保障（P2-10）**：**358 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 九 job 全绿**
   （**`CI #23` / run `36677436460`**；八 job 基线：`CI #21` / run `36673194795`；七 job 基线：`CI #19` / run `36663136008`）
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
@@ -118,7 +119,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（332 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（358 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1（阈值/报告路径可覆盖）
 │   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
@@ -417,7 +418,6 @@ python demo_graph.py
 三种终态——已执行 / 待确认 / 被拒——在答复与前端里都能一眼区分。
 
 三条安全底线收口在 `ActionRunner`（校验 → 确认门 → 执行 → 审计），新动作注册即自动获得：
-
 ```
 $ python scripts/check_mcp.py     # 真实 stdio 子进程 + 官方 MCP 客户端
   [OK] 未确认的退款被拦在待确认（未执行）
@@ -426,6 +426,43 @@ $ python scripts/check_mcp.py     # 真实 stdio 子进程 + 官方 MCP 客户�
   [OK] list_tickets 能回读出前面建的工单（count=1）   ← 副作用真的落盘了
 ```
 
+### 动作结果回写图谱（P2-9 收尾）：把「执行」接回「再检索」
+
+动作默认只落审计与答复，图谱里不留痕迹——于是「执行 → 关系 → 再检索」是**断的**：
+客户接着问「刚给 A 客户建的工单涉及哪个产品」，图谱答不出来。
+
+本体的 `Ticket` / `Customer` / `Product` 与 `SUBMITTED_BY` / `ABOUT_PRODUCT` 早已就绪，
+但只有「LLM 从文档抽取」这一条写入路径。开 `KB_ACTION_GRAPH=1` 后补上第二条：
+
+```
+Ticket:TKT-XXXXXXXX   props: subject / priority / sla_response / status
+  ├─ SUBMITTED_BY ──→ Customer:ACME        （customer 为空则整条跳过，不建空节点）
+  └─ ABOUT_PRODUCT ─→ Product:LM3-ARM      （sku 来自提问上下文或入参）
+```
+
+三条底线，与前三条闸门同一性质（写死在代码里，不可配置）：
+
+| 底线 | 为什么 |
+|---|---|
+| **只有真执行成功才写** | `needs_confirmation`（确认门拦住）与 `rejected` 一律不写——被拦下的动作在真实世界什么都没发生，图谱里也不该有它 |
+| **写失败不改动作结论** | 图谱不可用 → 返回 `graph.applied=false` + `reason`，动作仍 `ok=true`。动作**已经发生**，记账失败若报成失败，会诱导调用方重试 = 第二次执行（写操作重复执行才是真事故） |
+| **映射必须过本体校验** | 三元组统一过 `Triple.is_valid()`；写错的映射只会进 `dropped` 并被丢弃，**不可能污染图谱**（本体驱动 D3 的意义就是不让图谱被随手扩张） |
+
+映射是**声明式**的（`action_graph.ACTION_EFFECTS`，一个动作一条 `Effect`），
+所以「新增动作要不要回写、写成什么形状」是一个可评审的条目，而不是散落的 if。
+
+**刻意不回写的动作**（不是遗漏）：`update_order` / `request_refund` —— 本体里没有
+`Order` / `Refund` 节点，而它们的真相在**实时后端**（P0-2）不在知识图谱里；
+把运行态数据塞进知识图会污染检索。`list_tickets` 是只读动作，不产生新事实。
+
+**方向语义（踩过）**：回写建立的是 `Ticket → Customer` 出边，所以「按客户查工单」是**入边**，
+必须 `direction=both` / `in`；用默认的 `out` 会**静默返回空列表**——
+又一个「不报错、答案悄悄变错」的例子。`scripts/check_age.py` 阶段七把这条也钉成断言。
+
+真跑在**真实 Apache AGE** 上验（CI `age` job，全部旁路对账，不信 store 的话）：
+关掉开关时动作照常成功且 AGE 里零写入 → 打开后 `Ticket` / `SUBMITTED_BY` / `ABOUT_PRODUCT`
+label 表真的多出行来 → 独立 Cypher 读回 props → 从客户反查得到该工单。
+
 ### 自检
 
 ```bash
@@ -433,7 +470,7 @@ python demo_agents.py                  # 固定流水线协作（只入向量库
 python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 依赖分层 / 双向协商 / 降级 / 人工介入（28 项断言）
 python scripts/check_mcp.py            # P2-9 真实 MCP 协议端到端（握手 / 工具 / 动作确认门 / 审计 / 多 agent）
 python scripts/check_load.py           # P2-10 补：真实 HTTP 并发压测（会临时起 app 子进程）
-python scripts/check_age.py            # P2-10 补：真实 Apache AGE 图侧（需目标 PG 带 age 扩展）
+python scripts/check_age.py            # P2-10 补：真实 Apache AGE 图侧（含 P2-9 收尾的动作回写，需目标 PG 带 age 扩展）
 ```
 
 `check_load.py` 的四个场景与实际断言：
@@ -470,6 +507,7 @@ LLM 不可达时自动熔断（60s 内不再重试）并回退规则/模板，�
 | 加固 | `KB_API_TOKEN` / `KB_RATE_LIMIT` / `KB_LOG_FILE` | Bearer 鉴权 / 每 IP 限流 / 结构化日志 |
 | 协作 | `KB_AGENT_MODE` / `KB_AGENT_PLANNER` / `KB_AGENT_MAX_ROUNDS` / `KB_AGENT_HITL` | 编排模式 / 动态任务分解 / 证据协商轮次 / 人工介入 |
 | 动作 | `KB_AGENT_ACTIONS` / `KB_ACTION_LOG` | 动作执行者是否参与编排（默认 `0`） / 动作审计日志路径（`off`=关闭） |
+| 动作 | `KB_ACTION_GRAPH` | 执行成功的动作是否把结果回写知识图谱（默认 `0`；写失败只降级，不改动作结论） |
 
 > 页面「接口配置」提交的配置会持久化到 `runtime_config.json`，优先级高于 `.env`。
 
@@ -505,6 +543,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 | `KB_API_CIRCUIT_COOLDOWN` | `30` | 开路冷却秒数，之后放半开探测 |
 | `KB_AGENT_MAX_ROUNDS` | `1` | `>1` 启用双向协商补轮（`Subtask.depends_on` 依赖分层**无需开关**，默认行为与旧版等价） |
 | `KB_AGENT_ACTIONS` | `0` | `1` 时 ActionAgent 参与编排（不可逆动作仍只停在待确认） |
+| `KB_ACTION_GRAPH` | `0` | `1` 时执行成功的动作把结果回写知识图谱（默认等价旧行为：不开则零写入） |
 | `KB_ACTION_LOG` | `kb_actions.jsonl` | 动作审计日志路径（`off`=不落盘） |
 
 镜像内置 `HEALTHCHECK` 探 `/healthz`（`docker compose ps` 可直接看健康状态）。
@@ -568,7 +607,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 332 例，离线约 12s
+python -m pytest tests/ -v      # 358 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
@@ -582,6 +621,7 @@ python -m pytest tests/ -v      # 332 例，离线约 12s
 | `test_adapters_resilience.py` | 51 | 重试次数语义与指数退避封顶、熔断状态机、降级不抛异常、失败不写缓存、**可重试性分级**（4xx 不重试 / 不计熔断）、**`not_found` 终态**与 `HTTPStatusError` 转换 |
 | `test_planner_collaboration.py` | 72 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关；**P1-4 收尾**：依赖分层（无依赖单层等价旧行为 / 跨层串行 / 轮外依赖视为满足 / 自依赖忽略 / 成环降级不卡死）、`depends_on` 解析（悬空 / 自依赖 / 能力别名都要安全丢弃）、协商账本（唯一 id / 空账本不出现）、双向协商（worker 委托 / 沉默不算数 / 无主请求关账 / 已执行不重跑） |
 | `test_actions.py` | 53 | 动作参数契约、**确认门**、审计三终态、意图识别与参数抽取、参与闸门、HITL 闭环 |
+| `test_action_graph.py` | 26 | **动作结果回写图谱**（P2-9 收尾）：默认关时零写入且返回/审计里连 `graph` 字段都不出现、开时节点与关系真落图（含 props 与双向可达）、确认门拦住与 rejected **不写**、只读/无映射动作不写、**本体校验丢弃非法映射**、图谱报错时动作仍成功且审计留降级原因、重复回写幂等 |
 | `test_baseline_gate.py` | 11 | **基线校验脚本本身**：阈值覆盖、报告路径三来源、恰好等于阈值放行、低于必红、缺失必失败 |
 | `test_graph_age_cypher.py` | 15 | **AGE `cypher()` 两条硬约束**：① 列定义列表列数必须等于 `RETURN` 表达式数；② 图名与 Cypher 原文必须是**常量字面量**（内联 + 美元引用，不得出现 `$1/$2`）。假连接抓 SQL 断言，**不需要真实 PG** |
 
@@ -612,7 +652,7 @@ python -m pytest tests/ -v      # 332 例，离线约 12s
 | `load` | 推送 / PR | 真实 HTTP 并发压测（只读 / 混合读写 / 限流门 / 指标自洽） | 并发下**不丢数据、限流精确、零错误** |
 | `adapters` | 推送 / PR | 起**真实 socket + 真实 HTTP 协议**的本地替身后端，让真实 `urllib` 适配器打过去（26 项断言）+ 真实 app 子进程端到端 | 出站适配层**真能完成一次 HTTP 往返**：重试计数 / 超时受约束 / 熔断后请求数冻结 / 404 与 401 不重试 / 429 重试 |
 | `collab` | 推送 / PR | `scripts/verify_collaboration.py`：真实 worker 链路（只把 LLM 换替身）走 7 个场景、28 项断言 | 协作**轨迹结构**真对：依赖真分层 / 补轮真来源 / 账本真关账 / 沉默真不算数（不是「脚本跑完没报错」） |
-| `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → **AGE 语法能力探针**（含多列 `RETURN` 列数契约）→ 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
+| `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → **AGE 语法能力探针**（含多列 `RETURN` 列数契约）→ 真实摄取写入 → 原始表对账 → **动作回写（执行 → 关系 → 再检索）** | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图；动作结果真的落进 AGE 的 label 表 |
 | `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
 评测报告作为 artifact 归档 30 天；`load` / `adapters` / `collab` / `age` 的报告同样归档。

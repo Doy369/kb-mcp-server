@@ -1,7 +1,7 @@
-# tests/ — 自动化测试（332 例，离线零服务依赖）
+# tests/ — 自动化测试（358 例，离线零服务依赖）
 
 ```bash
-python -m pytest tests/ -q      # 332 passed，本地约 12s
+python -m pytest tests/ -q      # 358 passed，本地约 12s
 ```
 
 不装 torch、不联网、不需要任何外部服务（dev 嵌入 + memory 后端跑全部断言）。
@@ -10,7 +10,8 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 端到端验证由 `pg` job 负责，真实 MCP 协议验证由 `mcp` job 负责（`scripts/check_mcp.py`），
 真实并发 HTTP 压测由 `load` job 负责，真实 HTTP 往返由 `adapters` job 负责
 （`scripts/check_adapters_live.py`），真实 worker 协作链路（含依赖分层 / 双向协商）由
-`collab` job 负责（`scripts/verify_collaboration.py`），真实 Apache AGE 图侧由 `age` job 负责，
+`collab` job 负责（`scripts/verify_collaboration.py`），真实 Apache AGE 图侧（含 P2-9 收尾的
+**动作回写**）由 `age` job 负责，
 真实 bge 嵌入由 `bge` job（夜间 + 手动）负责。
 
 ## 覆盖分层
@@ -24,6 +25,7 @@ CI 的 `test` job 会额外装 `psycopg[binary]` / `pgvector` 这两个**轻量�
 | `test_adapters_resilience.py` | 51 | 重试次数语义与指数退避封顶、熔断状态机（开路/半开/闭合、半开再失败重新计时）、开路期零调用、降级不抛异常、失败不写缓存、降级卡片在归一化/模板/LLM 提示词三处不 KeyError、**可重试性分级**（4xx 除 408/429 不重试且不计熔断、5xx 与传输错误仍重试）、**`not_found` 终态**（404 单发、不计 failures、不开熔断、`probe` 判 ok）、`HTTPStatusError` 转换（非状态类失败原样透传）、`RetryPolicy.call(retryable=)` 三条契约（含默认 `None` 保持旧语义） |
 | `test_planner_collaboration.py` | 72 | P1-4 动态协作：LLM 任务分解（markdown 代码块包裹 / 前后噪声 / 幻觉 agent 丢弃 / capability 别名 / 骨架 agent 不入候选）、四条降级路径必回退且不抛异常、协商只提未执行能力（保证收敛）、多轮补轮不重复执行、默认单轮等价旧行为、HITL 开关与挂起、配置容错。**P1-4 收尾**：依赖分层（无依赖=单层且顺序=计划顺序 / 同层并行层间串行 / 轮外依赖视为满足 / 自依赖忽略 / 成环降级不卡死并记 `dep_cycles`）、`LLMPlanner` 解析 `depends_on`（悬空与自依赖必须丢弃、能力别名可解析）、协商账本契约（`request_help`/`reply` 的 `by` 用 `self.name`、id 唯一、默认无账本、`Critique.to_dict` 空 `requests` 省略字段）、双向协商（worker 主动委托触发补轮 / **沉默不算数**：无产出记 `declined` / 无主能力关账 `unavailable` / 已执行者不重跑 / agent 自答被尊重 / 轮次上限兜底） |
 | `test_actions.py` | 53 | P2-9 动作型工具：**参数契约**（缺必填/非法枚举一律 rejected）、**确认门**（destructive 未确认绝不执行且不产生 result）、**审计三终态全留痕**（含可关闭）、意图识别与参数抽取（含「订单号里的数字不得被当成金额」回归）、ActionAgent 三道闸（参与闸门 / 意图闸门 / `confirmed` 恒 False）、接入编排（开关 / 轨迹 / 与 HITL 闭环 / 对外契约不变）、合成三终态渲染对未知动作类型安全 |
+| `test_action_graph.py` | 26 | **动作结果回写图谱**（P2-9 收尾）：开关默认关且关了以后零写入 + 返回值/审计里**连 `graph` 字段都不出现**（默认等价旧行为）、开时 Ticket 节点与 props 真落图、`SUBMITTED_BY`/`ABOUT_PRODUCT` 关系按字段有无**条件建立**（空值不建空节点）、**双向可达**（反向需 `direction=both`，`out` 会静默为空）、**确认门拦住 / rejected / 只读动作 / 无映射动作一律不写**、**本体校验丢弃非法映射**（非法关系、未知节点类型、缺主体名）、图谱报错时**动作仍成功**且审计留降级原因、重复回写幂等、默认映射本身必须是本体子集 |
 | `test_baseline_gate.py` | 11 | `scripts/check_baseline.py`（**同时把守 `test` 与 `bge` 两个 job**）：默认阈值 0.72、`KB_BASELINE_MIN` 覆盖、非法阈值必须炸（不许静默退回默认值）、报告路径三种来源与优先级、相对路径按**仓库根**解析、恰好等于阈值放行、低于阈值必红、报告缺失必失败 |
 | `test_graph_age_cypher.py` | 15 | AGE `cypher()` 的**两条硬约束**（都由真机才暴露）：① 列定义列表列数必须等于 `RETURN` 表达式数（`find_entities`=3 / `neighbors`=4 / `paths`=2 / `export_graph`=5；单列接口恒 1 列；终止型 `nout=0` 收敛到 1 列）；② 图名与 Cypher 原文必须是**常量字面量**（内联 `'kb_graph'` + 美元引用 `$kb$…$kb$`，绝不出现 `$1/$2`），只有第三个 agtype 参数允许绑定。含美元标签冲突回退与单引号转义。**不需要真实 PG** |
 
