@@ -60,3 +60,9 @@ exe_test.log
 load_report.json
 age_report.json
 eval_report_bge.json
+
+# P0-2 实时适配器联调脚本产物
+#   · 真实本地 HTTP 替身后端 + 真实 app 子进程所需的隔离数据目录
+#   · 报告不入库（同 load/age 口径：记录的是「那一次机器上的数字」）
+.adapters_live_runtime/
+adapters_live_report.json

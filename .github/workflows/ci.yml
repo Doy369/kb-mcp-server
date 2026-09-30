@@ -309,7 +309,66 @@ jobs:
           if-no-files-found: warn
 
   # ------------------------------------------------------------------ #
-  # 6) 图谱：真实 Apache AGE
+  # 6) 实时适配器：真实 HTTP 往返（不是 mock 函数替身）
+  #
+  # 为什么需要这一步：P0-2 适配层（重试 / 退避 / 熔断 / TTL 缓存 / 降级 / 查不到）
+  # 此前只被两类测试覆盖：单测把 HTTP 层整个 monkeypatch 掉（是**函数替身**，一行
+  # socket 都没走），以及「后端不可达」这一种联调。于是「真能跟一个真实 HTTP 服务
+  # 完成一次往返」始终是未验证假设——而恰恰只有真实往返才暴露得出这些 bug：
+  #   · urllib 会把头名 capitalize（`X-Api-Key` → `X-api-key`），断言若大小写敏感就会误判；
+  #   · HTTP/1.1 必须带 Content-Length，否则客户端会读成半包/挂住；
+  #   · socket 超时在真实连接上表现为 TimeoutError，而不是某个 HTTP 状态码。
+  #
+  # 本 job 起一个**真实 socket + 真实 HTTP 协议**的本地替身后端（ThreadingHTTPServer），
+  # 让真实 urllib 适配器打过去；断言全部基于「服务端实际收到什么、被打多少次」：
+  #   真实 200 字段映射 / 鉴权三模式（bearer·header·query）/ TTL 缓存不产生新请求 /
+  #   5xx 重试计数 / 超时受 timeout 约束 / 熔断开路后请求数**冻结**且毫秒级快速失败 /
+  #   404 不重试且判为「查不到」/ 401 不重试不计熔断 / 429 仍重试 / 瞬时故障自愈 /
+  #   端到端经 /api/ask 带出**真实**后端数据（mock 模式不会有 SHIPPED）。
+  # ------------------------------------------------------------------ #
+  adapters:
+    name: 实时适配器（真实 HTTP 往返）
+    runs-on: ubuntu-latest
+
+    env:
+      KB_STORAGE_BACKEND: memory
+      KB_EMBEDDING_BACKEND: dev
+      KB_GRAPH_BACKEND: memory
+      KB_GRAPH_ENABLED: "1"
+      KB_LLM_ENABLED: "0"
+      KB_AGENT_MODE: deterministic
+      KB_API_MOCK: "1"
+      KB_AUDIT_LOG: "off"
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖（与单测 job 同口径）
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pydantic python-dotenv "mcp<2" numpy rank-bm25 pypdf "psycopg[binary]" pgvector
+
+      - name: 真实 HTTP 往返联调（真实替身后端 + 真实 app 子进程）
+        run: python scripts/check_adapters_live.py
+
+      - name: 失败时导出报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapters-live-report
+          path: adapters_live_report.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ------------------------------------------------------------------ #
+  # 7) 图谱：真实 Apache AGE
   #
   # 为什么需要这一步：向量侧的 pgvector 早已在 CI 跑通，**图侧一直是空白**——
   # `pg` job 用的 pgvector 镜像不含 AGE，`setup_db.py --graph` 会按设计降级成
@@ -383,7 +442,7 @@ jobs:
           if-no-files-found: warn
 
   # ------------------------------------------------------------------ #
-  # 7) bge 真实嵌入：质量上限（夜间 + 手动，不跟每次推送）
+  # 8) bge 真实嵌入：质量上限（夜间 + 手动，不跟每次推送）
   #
   # 为什么单独一个 job 且不在推送时跑：bge 要装 torch + 下 1.3GB 模型，
   # 单次运行从 ~40s 涨到数分钟。高频 job 一旦变慢就会被习惯性忽略，
