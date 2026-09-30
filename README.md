@@ -29,13 +29,15 @@
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**286 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job**
+- **质量保障（P2-10）**：**286 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 七 job 全绿**
+  （`CI #19` / run `36663136008`）
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
   ④ 真实 MCP 协议：stdio 子进程 + 客户端握手 → 工具调用 → 动作确认门与审计；
   ⑤ **负载测试**：真实 HTTP 并发，断言零错误 / 并发写入不丢数据 / 限流精确 / 指标自洽；
-  ⑥ **真实 Apache AGE**：扩展 → 建图 → 不静默降级 → 真实摄取写入 → 原始 `ag_catalog` 表对账；
+  ⑥ **真实 Apache AGE**：扩展 → 建图 → 不静默降级 → **语法能力探针** → 真实摄取写入 →
+  原始 `ag_catalog` 表对账（真跑凭据：7 顶点 / 6 边）；
   ⑦ **真实 bge 嵌入**（夜间 + 手动，阈值 0.95）——保「质量上限」，不拖慢每次推送。
 - **容器化（P0-3）**：`Dockerfile` + `docker-compose.yml`，镜像按 build arg 分档
   （轻量 ~150MB / 含 bge / 含 pgvector），内置 `HEALTHCHECK`；构建与启动由 CI 每次提交验证。
@@ -542,12 +544,13 @@ python -m pytest tests/ -v      # 286 例，离线约 12s
 > `test_baseline_gate.py` 的理由：该脚本**同时把守 `test` 与 `bge` 两个 job**。
 > 参数解析写错时表现不是报错，而是**静默失效**——CI 照样绿，只是不再拦任何东西。
 
-> `test_graph_age_cypher.py` 锁的是一条**只在真机上才暴露**的契约：AGE 的 `cypher()`
-> 返回 `SETOF record`，PostgreSQL 会逐一比对列定义列表与 `RETURN` 表达式数，不符即报
-> `return row and column definition list do not match`。`_cypher()` 曾恒声明单列
-> `(v agtype)`，而 `find_entities` / `neighbors` / `paths` / `export_graph` 都是多列
-> `RETURN`——本地单测（memory 后端）永远走不到，于是「一直没错」；直到 `age` job 在
-> 真实 AGE 上首跑即崩。把契约钉进单测后，任何新接口忘了传 `nout` 都会在本地就红。
+> `test_graph_age_cypher.py` 锁的是两条**只在真机上才暴露**的 AGE 契约：`cypher()` 会被
+> `post_parse_analyze_hook` 拦截做语法改写，因此 ① **列定义列表列数必须等于 `RETURN`
+> 表达式数**（否则 `return row and column definition list do not match`）；
+> ② **图名与 Cypher 原文必须是常量字面量**（否则 AGE 读不到原文，报
+> `a name constant is expected`）。`_cypher()` 曾同时违反这两条，而本地单测（memory 后端）
+> 根本不生成 SQL——「一直没错」；直到 `age` job 上真机才被一一打挂。把契约钉进单测后，
+> 任何新接口忘了传 `nout`、或有人改回绑定参数，都会在本地就红。
 
 > 其中多条用例直接锁住 ROADMAP 记录过的真 bug——**不报错、只是答案悄悄变差**的那类问题，
 > 没有测试就只能靠肉眼发现。
@@ -567,6 +570,11 @@ python -m pytest tests/ -v      # 286 例，离线约 12s
 | `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
 评测报告作为 artifact 归档 30 天；`load` / `age` 的报告同样归档。
+
+七 job 齐跑实测：**`CI #19` / run `36663136008`，全绿**（`bge` 按 schedule 跳过属正常）。
+其中 `age` job 的真跑凭据由 `::notice::` 注解直接可见：`age=1.6.0`，
+顶点 `Document 1 / IssueCategory 3 / SLAClause 2 / Product 1`、
+边 `MENTIONS 3 / GOVERNED_BY 2 / ABOUT_PRODUCT 1`（= 7 顶点 / 6 边，与 `stats()` 口径一致）。
 
 **为何 bge 不跟每次推送**：dev 嵌入下通过率 91%（语义级断言前 82%；唯一 FAIL 是 P2 哨兵用例，
 受限于 dev 对 `P0/P1/P2` 字面相似片段的区分能力），bge 下 **100%**。
