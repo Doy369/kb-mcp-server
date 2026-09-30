@@ -33,8 +33,8 @@
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**308 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 八 job**
-  （七 job 基线：`CI #19` / run `36663136008` 全绿）
+- **质量保障（P2-10）**：**308 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 八 job 全绿**
+  （`CI #21` / run `36673194795`；七 job 基线：`CI #19` / run `36663136008`）
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
@@ -580,7 +580,7 @@ python -m pytest tests/ -v      # 308 例，离线约 12s
 评测报告作为 artifact 归档 30 天；`load` / `adapters` / `age` 的报告同样归档。
 
 七 job 基线实测：**`CI #19` / run `36663136008`，全绿**（`bge` 按 schedule 跳过属正常）；
-后新增 `adapters` job（真实 HTTP 往返）成八 job。
+后新增 `adapters` job（真实 HTTP 往返）成八 job，**`CI #21` / run `36673194795` 八 job 全绿**。
 其中 `age` job 的真跑凭据由 `::notice::` 注解直接可见：`age=1.6.0`，
 顶点 `Document 1 / IssueCategory 3 / SLAClause 2 / Product 1`、
 边 `MENTIONS 3 / GOVERNED_BY 2 / ABOUT_PRODUCT 1`（= 7 顶点 / 6 边，与 `stats()` 口径一致）。
