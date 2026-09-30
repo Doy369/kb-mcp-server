@@ -153,13 +153,20 @@ def cypher_sql(graph: str, query: str, cols: str = "v agtype") -> str:
 
 
 def count_labels(graph: str) -> tuple[int, int, dict]:
-    """绕开 store，直接数 AGE 为各 label 建的表里的行数。返回 (顶点数, 边数, 明细)。"""
+    """绕开 store，直接数 AGE 为各 label 建的表里的行数。返回 (顶点数, 边数, 明细)。
+
+    **必须排除 `_ag_label_vertex` / `_ag_label_edge`**：AGE 用它们作
+    「所有顶点/边 label 表的继承父表」（每个图都有），父表 `count(*)` 会把子表行
+    一并算进来（PostgreSQL 继承语义）。若把父表也累加，顶点/边数量会**翻倍**
+    ——真机上表现为 `stats()` 报 7 顶点而原始表算成 14，这条对账断言直接红。
+    """
     rows = raw(
         """
         SELECT l.name, l.kind::text
         FROM ag_catalog.ag_label l
         JOIN ag_catalog.ag_graph g ON l.graph = g.graphid
         WHERE g.name = %s
+          AND l.name NOT IN ('_ag_label_vertex', '_ag_label_edge')
         """,
         (graph,),
     )
