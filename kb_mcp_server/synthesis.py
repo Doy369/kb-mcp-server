@@ -95,8 +95,17 @@ def _live_line(c: dict) -> str:
                 f"（{c.get('carrier', '')} 预计 {c.get('eta', '')}）")
     if t == "inventory":
         return f"SKU {c.get('sku')}：库存 {c.get('stock')}（{c.get('warehouse', '')}）"
+    if t == "not_found":
+        # 「查不到」≠「后端挂了」。分开表述，客服才知道该去找单号还是找运维。
+        target = c.get("order_id") or c.get("sku") or ""
+        return f"{c.get('adapter', '')}：未查询到 {target}（后端明确返回不存在，非故障）"
     if t == "degraded":
-        why = "熔断开路，未发起调用" if c.get("short_circuited") else f"重试 {c.get('attempts', 0)} 次仍失败"
+        if c.get("short_circuited"):
+            why = "熔断开路，未发起调用"
+        elif c.get("non_retryable"):
+            why = f"请求被后端拒绝，未重试（{c.get('error', '')}）"
+        else:
+            why = f"尝试 {c.get('attempts', 0)} 次仍失败"
         return f"{c.get('adapter', '')}：实时数据暂不可用（{why}）"
     return f"{c.get('adapter', '')}：{c.get('note', '')}"
 

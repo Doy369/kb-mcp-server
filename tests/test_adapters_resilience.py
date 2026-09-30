@@ -10,9 +10,16 @@
 - 重试耗尽**不抛异常**，改为降级（`degraded=True`），主链路不崩；
 - **失败不写缓存**（否则一次抖动被 TTL 放大成持续 30s 的错误）；
 - 降级卡片在归一化 / 模板合成 / LLM 提示词三处都不会 KeyError。
+
+P0-2 收尾（真实 endpoint 联调）补的契约：
+- **4xx（除 408/429）是确定性失败**：不重试、不计熔断；
+- `404` 是**第三种终态** `not_found`，与 `degraded` 严格区分；
+- `RetryPolicy.call(retryable=)` 的判定在**任一次**失败上生效，且默认 `None` 保持旧语义。
 """
 
 from __future__ import annotations
+
+import urllib.error
 
 import pytest
 
@@ -58,6 +65,28 @@ def _order_adapter(monkeypatch, *, policy: RetryPolicy, fail_first: int = 0, ttl
     a.mock = False          # enabled() 要求 base_url 非空且非 mock
     a.ttl = ttl
     return a, counters
+
+
+def _install_http_status(monkeypatch, status: int, fail_first: int | None = None):
+    """HTTP 层桩：前 `fail_first` 次抛 `HTTPStatusError(status)`，之后成功。
+
+    与 `_install_http` 的区别：那个抛 `OSError`（泛指瞬时网络故障），
+    这个抛**带状态码**的失败，用来验证「按状态码决策」的分支。
+    `fail_first=None` 表示一直失败（用于「确定性失败」用例）。
+    """
+    counters = {"n": 0}
+    body = {"status": "已发货", "carrier": "顺丰", "eta": "2026-09-30"}
+    limit = 10 ** 9 if fail_first is None else fail_first
+
+    def fake_http(url, api_key, timeout, scheme="bearer",
+                  auth_header="Authorization", auth_query=""):
+        counters["n"] += 1
+        if counters["n"] <= limit:
+            raise adapters.HTTPStatusError(status, url, "test-injected")
+        return body
+
+    monkeypatch.setattr(adapters, "_http_get_json", fake_http)
+    return counters
 
 
 # --------------------------------------------------------------------------- #
@@ -358,3 +387,223 @@ class TestDegradedCardConsumption:
             "type": "degraded", "adapter": "order_status", "attempts": 3,
         }])
         assert "【实时数据】" in detail and "暂不可用" in detail
+
+
+# --------------------------------------------------------------------------- #
+# P0-2 收尾：可重试性判定（真实性失败 vs 瞬时失败）
+# --------------------------------------------------------------------------- #
+class TestRetryableClassification:
+    """`is_retryable` 是「这次失败值不值得重试」的唯一裁决点。
+
+    判错的代价不对称：
+    - 把瞬时故障判成确定性失败 → 少了本该有的自愈，一次抖动直接降级；
+    - 把确定性失败判成瞬时故障 → 白白重试 N 次、拖长延迟、还污染熔断统计。
+    """
+
+    def test_4xx_are_not_retryable(self):
+        for code in (400, 401, 403, 404, 409, 422):
+            assert adapters.is_retryable(adapters.HTTPStatusError(code, "u")) is False, code
+
+    def test_408_and_429_are_retryable(self):
+        # 服务端自己的超时 / 限流：退避后重试是对的
+        assert adapters.is_retryable(adapters.HTTPStatusError(408, "u")) is True
+        assert adapters.is_retryable(adapters.HTTPStatusError(429, "u")) is True
+
+    def test_5xx_and_transport_errors_are_retryable(self):
+        assert adapters.is_retryable(adapters.HTTPStatusError(500, "u")) is True
+        assert adapters.is_retryable(adapters.HTTPStatusError(503, "u")) is True
+        # 无状态码的失败（连接被拒 / 超时 / DNS）一律重试
+        assert adapters.is_retryable(OSError("connection refused")) is True
+        assert adapters.is_retryable(TimeoutError("timed out")) is True
+
+    def test_http_status_error_carries_status_and_url(self):
+        e = adapters.HTTPStatusError(404, "http://x/orders/1", "Not Found")
+        assert e.status == 404 and e.url == "http://x/orders/1"
+        assert "404" in str(e) and "Not Found" in str(e)
+
+
+class TestHttpStatusErrorConversion:
+    """`_http_get_json` 只把 HTTP 状态类失败转成 `HTTPStatusError`，其余原样透传。"""
+
+    def test_httperror_is_converted(self, monkeypatch):
+        def boom(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 503, "Service Unavailable", {}, None)
+
+        monkeypatch.setattr("urllib.request.urlopen", boom)
+        with pytest.raises(adapters.HTTPStatusError) as ei:
+            adapters._http_get_json("http://x/1", None, 5)
+        assert ei.value.status == 503 and ei.value.url == "http://x/1"
+
+    def test_transport_error_passes_through_unchanged(self, monkeypatch):
+        """非 HTTP 状态类失败不能被包装——上层要靠类型区分「超时」与「状态码」。"""
+
+        def boom(req, timeout=None):
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr("urllib.request.urlopen", boom)
+        with pytest.raises(TimeoutError):
+            adapters._http_get_json("http://x/1", None, 5)
+
+
+class TestNonRetryablePolicyContract:
+    """`RetryPolicy.call(retryable=)` 的行为契约。"""
+
+    def test_non_retryable_stops_immediately(self):
+        calls = {"n": 0}
+
+        def fn():
+            calls["n"] += 1
+            raise adapters.HTTPStatusError(404, "u")
+
+        res = RetryPolicy(max_retries=5).call(
+            fn, sleep=lambda _s: None, retryable=lambda _e: False)
+        assert calls["n"] == 1 and res.attempts == 1
+        assert res.ok is False and res.non_retryable is True
+        assert isinstance(res.error, adapters.HTTPStatusError)
+
+    def test_non_retryable_does_not_trip_breaker(self):
+        """确定性失败 ≠ 后端不可用：阈值 1 也不能被它打开熔断。"""
+        p = RetryPolicy(max_retries=3, circuit_breaker=True, cb_threshold=1, cb_cooldown_s=60)
+
+        def fn():
+            raise adapters.HTTPStatusError(401, "u")
+
+        p.call(fn, sleep=lambda _s: None, retryable=lambda _e: False)
+        assert p.breaker_state() == CIRCUIT_CLOSED
+        # 熔断仍可正常服务（没被无谓地开路）
+        assert p.breaker.allow() is True
+
+    def test_retryable_predicate_is_consulted_per_failure(self):
+        """判定在**每一次**失败上生效：可重试的前几次照样重试。"""
+        calls = {"n": 0}
+
+        def fn():
+            calls["n"] += 1
+            raise adapters.HTTPStatusError(500, "u")
+
+        res = RetryPolicy(max_retries=2).call(
+            fn, sleep=lambda _s: None, retryable=lambda _e: True)
+        assert calls["n"] == 3 and res.attempts == 3 and res.non_retryable is False
+
+    def test_default_none_keeps_legacy_behaviour(self):
+        """不传 retryable 时，任何异常都可重试——旧调用点语义不得改变。"""
+        def fn():
+            raise adapters.HTTPStatusError(404, "u")
+
+        res = RetryPolicy(max_retries=2).call(fn, sleep=lambda _s: None)
+        assert res.attempts == 3 and res.non_retryable is False
+        assert res.ok is False
+
+
+class TestNotFoundTerminalState:
+    """404 → `not_found` 终态：不重试、不降级、不缓存、不进熔断。"""
+
+    def test_404_is_single_shot_not_found(self, monkeypatch):
+        a, _ = _order_adapter(monkeypatch, policy=RetryPolicy(max_retries=3))
+        counters = _install_http_status(monkeypatch, 404)      # 覆盖为带状态码的桩
+
+        r = a.call(order_id="MISSING1")
+        assert r["not_found"] is True
+        assert r["degraded"] is False, "查不到不是故障，不能混进降级"
+        assert r["attempts"] == 1
+        assert counters["n"] == 1, "确定性失败不得重试"
+        assert "404" in r["error"]
+
+    def test_404_not_counted_as_failure(self, monkeypatch):
+        a, _ = _order_adapter(monkeypatch, policy=RetryPolicy(max_retries=3))
+        _install_http_status(monkeypatch, 404)
+
+        a.call(order_id="MISSING1")
+        assert a.stats["not_found"] == 1
+        assert a.stats["degraded"] == 0 and a.stats["failures"] == 0
+
+    def test_404_does_not_trip_breaker(self, monkeypatch):
+        p = RetryPolicy(max_retries=1, circuit_breaker=True, cb_threshold=1, cb_cooldown_s=60)
+        a, _ = _order_adapter(monkeypatch, policy=p)
+        _install_http_status(monkeypatch, 404)
+
+        a.call(order_id="MISSING1")
+        assert p.breaker_state() == CIRCUIT_CLOSED
+
+    def test_401_is_non_retryable_but_still_degraded(self, monkeypatch):
+        """鉴权失败：不重试、不计熔断，但对用户仍是「实时数据不可用」。"""
+        p = RetryPolicy(max_retries=3, circuit_breaker=True, cb_threshold=1, cb_cooldown_s=60)
+        a, _ = _order_adapter(monkeypatch, policy=p)
+        counters = _install_http_status(monkeypatch, 401)
+
+        r = a.call(order_id="A1")
+        assert r["not_found"] is False, "401 不是「没有这条记录」"
+        assert r["degraded"] is True and r["non_retryable"] is True
+        assert r["attempts"] == 1 and counters["n"] == 1
+        assert p.breaker_state() == CIRCUIT_CLOSED, "配置错误不得开路熔断"
+
+    def test_429_is_still_retried(self, monkeypatch):
+        """限流是瞬时故障：退避后仍要重试。"""
+        a, _ = _order_adapter(monkeypatch, policy=RetryPolicy(max_retries=2))
+        counters = _install_http_status(monkeypatch, 429)
+
+        r = a.call(order_id="A1")
+        assert r["attempts"] == 3 and counters["n"] == 3
+        assert r["degraded"] is True and r["non_retryable"] is False
+
+    def test_inventory_404_is_not_found_too(self, monkeypatch):
+        counters = _install_http_status(monkeypatch, 404)
+        a = adapters.InventoryAdapter(base_url="http://inv.test", path_tpl="/stock/{id}",
+                                      retry_policy=RetryPolicy(max_retries=2),
+                                      sleep=lambda _s: None)
+        a.mock = False
+
+        r = a.call(sku="NOPE")
+        assert r["not_found"] is True and r["sku"] == "NOPE" and counters["n"] == 1
+
+    def test_probe_treats_404_as_ok(self, monkeypatch):
+        """自检验的是**配置**：404 证明 URL + 鉴权都通，只是测试 ID 不存在。"""
+        a, _ = _order_adapter(monkeypatch, policy=RetryPolicy(max_retries=2))
+        _install_http_status(monkeypatch, 404)
+
+        rep = a.probe("TEST1")
+        assert rep["ok"] is True and rep["not_found"] is True
+        assert "不在" in rep["note"] or "不存在" in rep["note"]
+
+
+class TestNotFoundCardConsumption:
+    """`not_found` 卡在归一化 / 合成层同样要安全且语义正确。"""
+
+    def test_normalize_live_marks_not_found_card(self):
+        cards = adapters.normalize_live([
+            {"order_id": "MISSING1", "not_found": True, "adapter": "order_status",
+             "error": "HTTPStatusError: HTTP 404 Not Found", "attempts": 1},
+        ])
+        assert len(cards) == 1
+        assert cards[0]["type"] == "not_found"
+        assert cards[0]["order_id"] == "MISSING1"
+
+    def test_not_found_not_rendered_as_empty_order_card(self):
+        """回归：not_found 响应带着 order_id，若不先拦会被判成「订单卡片但状态为空」。"""
+        cards = adapters.normalize_live([{"order_id": "MISSING1", "not_found": True,
+                                          "adapter": "order_status"}])
+        assert cards[0]["type"] != "order"
+
+    def test_not_found_beats_degraded_when_both_flags(self):
+        """防御：两个标记同时出现时也不得退化成「空订单卡」（正常路径下互斥）。"""
+        cards = adapters.normalize_live([{"order_id": "X", "degraded": True,
+                                          "not_found": True, "adapter": "order_status"}])
+        assert len(cards) == 1
+        assert cards[0]["type"] in ("degraded", "not_found")
+
+    def test_live_line_distinguishes_not_found_from_degraded(self):
+        from kb_mcp_server.synthesis import _live_line
+
+        line = _live_line({"type": "not_found", "adapter": "order_status",
+                           "order_id": "MISSING1"})
+        assert "未查询到" in line and "MISSING1" in line
+        assert "非故障" in line, "必须与「后端不可用」区分开"
+
+        degraded = _live_line({"type": "degraded", "adapter": "order_status",
+                               "non_retryable": True, "error": "HTTP 401"})
+        assert "暂不可用" in degraded and "拒绝" in degraded
+
+    def test_adapter_status_exposes_not_found_count(self):
+        st = {x["name"]: x for x in adapters.adapter_status()}
+        assert "not_found_calls" in st["order_status"]
+

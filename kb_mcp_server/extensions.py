@@ -685,6 +685,7 @@ class Attempt:
     error: BaseException | None = None
     attempts: int = 0
     short_circuited: bool = False          # True：因熔断开路而根本没发起调用
+    non_retryable: bool = False            # True：确定性失败（如 HTTP 4xx），未重试也未计熔断
 
     @property
     def error_text(self) -> str:
@@ -726,10 +727,22 @@ class RetryPolicy:
             return 0.0
         return min(self.backoff_s * (2 ** (attempt - 1)), self.max_backoff_s)
 
-    def call(self, fn, *, sleep=None) -> Attempt:
+    def call(self, fn, *, sleep=None, retryable=None) -> Attempt:
         """执行 fn，按策略重试。**不抛异常**——失败信息放在 Attempt.error 里。
 
         sleep 可注入（测试用），默认 time.sleep。
+
+        `retryable(exc) -> bool` 为**可选**判定：这一次失败值不值得重试。默认 `None`
+        表示「任何异常都可重试」，与既有语义完全一致（不传即旧行为）。
+
+        为什么需要它（真实 endpoint 联调发现）：HTTP **4xx（除 408/429）是确定性失败**。
+        「订单不存在」的 404 重试三次还是 404，「鉴权失败」的 401 重试三次还是 401——
+        只是把一次确定结果拖成三倍延迟，并给下游平白加压；对外还会被渲染成
+        「实时数据暂不可用（重试 3 次仍失败）」，把「这个单号查不到」误导成「后端挂了」。
+
+        同时：**非可重试失败不计入熔断**。后端返回「明确的拒绝」≠「后端不可用」，
+        记成熔断失败会让一个 401 配置错误在几次调用后把熔断打开，
+        从此所有请求都被短路——真正的原因被彻底掩盖。
         """
         sleep = sleep or time.sleep
         if self.breaker is not None and not self.breaker.allow():
@@ -742,8 +755,11 @@ class RetryPolicy:
             attempts += 1
             try:
                 value = fn()
-            except Exception as e:  # noqa: BLE001 —— 任何异常都可重试，降级由调用方决定
+            except Exception as e:  # noqa: BLE001 —— 默认可重试，降级由调用方决定
                 last = e
+                if retryable is not None and not retryable(e):
+                    # 确定性失败：不重试、不计熔断，立刻返回真实原因
+                    return Attempt(ok=False, error=last, attempts=attempts, non_retryable=True)
                 if self.breaker is not None:
                     self.breaker.record_failure()
                 if i >= self.max_retries:

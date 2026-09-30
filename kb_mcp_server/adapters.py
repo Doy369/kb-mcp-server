@@ -38,6 +38,9 @@ from kb_mcp_server.extensions import CIRCUIT_CLOSED, RetryPolicy
 #
 # degraded / error / attempts 是 P0-2 降级语义的载体：实时后端不可用时，
 # 这里返回 degraded=True 而非抛异常，UI 与合成层据此提示「实时数据暂不可用」。
+# not_found 是另一种**非错误**终态：后端明确回答「没有这条记录」（HTTP 404）。
+# 把它归进 degraded 是错的——用户问「订单 SO999 到哪了」，正确回答是「查不到该单号」，
+# 而不是「实时数据暂不可用」。两者混淆会让客服去排查一个根本没坏的后端。
 # --------------------------------------------------------------------------- #
 class OrderStatusResponse(BaseModel):
     order_id: str | None = None
@@ -46,6 +49,7 @@ class OrderStatusResponse(BaseModel):
     eta: str = ""
     mock: bool = False
     degraded: bool = False
+    not_found: bool = False
     error: str = ""
     attempts: int = 0
     raw: dict = {}
@@ -57,6 +61,7 @@ class InventoryResponse(BaseModel):
     warehouse: str = ""
     mock: bool = False
     degraded: bool = False
+    not_found: bool = False
     error: str = ""
     attempts: int = 0
     raw: dict = {}
@@ -110,6 +115,42 @@ def _enum_paths(obj, prefix="", max_depth=6):
     return out
 
 
+class HTTPStatusError(Exception):
+    """带 **HTTP 状态码** 的失败。
+
+    为什么不能像以前那样让 `urllib.error.HTTPError` 直接冒上去（它本来也带 code）：
+    调用方需要按状态码做**策略决策**（重试 or 不重试、降级 or 查不到），而
+    `HTTPError` 是 `URLError` 的子类、又混着 JSON 解析后的响应体，语义不好读。
+    这里收敛成一个显式类型，把 `status` 摆在面上——`RetryPolicy` 通过
+    `getattr(exc, "status", None)` 判定可重试性，不需要 import urllib。
+    """
+
+    def __init__(self, status: int, url: str, detail: str = "") -> None:
+        super().__init__(f"HTTP {status}" + (f" {detail}" if detail else ""))
+        self.status = status
+        self.url = url
+        self.detail = detail
+
+
+# 4xx 里**确实值得重试**的两个：
+#   408 Request Timeout —— 服务端自己超时，属瞬时故障；
+#   429 Too Many Requests —— 限流，退避后重试是对的（真实生产可再读 Retry-After）。
+RETRYABLE_4XX = frozenset({408, 429})
+
+
+def is_retryable(exc: BaseException) -> bool:
+    """这次失败值得重试吗？
+
+    4xx（除 408/429）是**确定性失败**：单号不存在、鉴权失败、字段被拒——
+    重试只是把同一个结果重复 N 次，白白拖长一次问答并放大下游压力。
+    其余（5xx / 连接被拒 / 超时 / DNS 失败）都视为瞬时故障，照旧重试。
+    """
+    status = getattr(exc, "status", None)
+    if isinstance(status, int) and 400 <= status < 500:
+        return status in RETRYABLE_4XX
+    return True
+
+
 def _http_get_json(
     url: str,
     api_key: str | None,
@@ -118,7 +159,11 @@ def _http_get_json(
     auth_header: str = "Authorization",
     auth_query: str = "",
 ) -> dict:
-    """发起带鉴权的 GET，返回解析后的 JSON。任何网络/解析错误原样抛出，由调用方处理。"""
+    """发起带鉴权的 GET，返回解析后的 JSON。
+
+    失败一律**原样抛出**，由调用方（RetryPolicy / _fetch）决定重试与降级；
+    但 HTTP 状态类失败统一转成 `HTTPStatusError`，好让上层能按状态码决策。
+    """
     req = urllib.request.Request(url)
     if api_key:
         if scheme == "bearer":
@@ -129,8 +174,11 @@ def _http_get_json(
             sep = "&" if "?" in url else "?"
             url = f"{url}{sep}{auth_query}={urllib.parse.quote(api_key, safe='')}"
             req = urllib.request.Request(url)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:  # noqa: PERF203 —— 只转状态类失败，其余透传
+        raise HTTPStatusError(e.code, url, str(e.reason or "")) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -169,18 +217,19 @@ class APIAdapter(ABC):
         self._sleep = sleep                     # 可注入（测试免真等待），默认 time.sleep
         self._cache: dict[str, tuple[float, Any]] = {}
         self.stats = {"calls": 0, "retries": 0, "failures": 0,
-                      "degraded": 0, "short_circuited": 0}
+                      "degraded": 0, "short_circuited": 0, "not_found": 0}
 
     def _url(self, key: str) -> str:
         return self.base_url + self.path_tpl.format(id=key)
 
     def _fetch(self, key: str) -> tuple[dict | None, dict]:
-        """取数：返回 `(数据, 元信息)`。**任何失败都不抛异常**，改为降级返回。
+        """取数：返回 `(数据, 元信息)`。**任何失败都不抛异常**，改为降级/查不到返回。
 
-        元信息：{"degraded", "cached", "attempts", "error", "short_circuited", "circuit"}。
+        元信息：{"degraded", "not_found", "cached", "attempts", "error",
+                "non_retryable", "short_circuited", "circuit"}。
 
-        注意：**失败不写缓存** —— 否则一次网络抖动会被 TTL 放大成持续 30s 的错误，
-        且掩盖熔断的快速失败效果。
+        注意两点：**失败不写缓存**（否则一次网络抖动会被 TTL 放大成持续 30s 的错误，
+        且掩盖熔断的快速失败效果）；**404 与降级是两回事**（见下）。
         """
         now = time.time()
         hit = self._cache.get(key)
@@ -195,6 +244,7 @@ class APIAdapter(ABC):
                 self.scheme, self.auth_header, self.auth_query,
             ),
             sleep=self._sleep,
+            retryable=is_retryable,
         )
         self.stats["calls"] += 1
         self.stats["retries"] += max(0, attempt.attempts - 1)
@@ -205,6 +255,19 @@ class APIAdapter(ABC):
                                    "attempts": attempt.attempts,
                                    "circuit": self.policy.breaker_state()}
 
+        # 404 是**确定性答案**而不是故障：后端明确回答「没有这条记录」。
+        # 必须是独立的终态，不能混进 degraded —— 否则「单号查不到」会被渲染成
+        # 「实时数据暂不可用」，让客服去排查一个根本没坏的后端。
+        status = getattr(attempt.error, "status", None)
+        if status == 404:
+            self.stats["not_found"] += 1
+            return None, {
+                "not_found": True, "degraded": False, "cached": False,
+                "status": status, "attempts": attempt.attempts,
+                "error": attempt.error_text,
+                "circuit": self.policy.breaker_state(),
+            }
+
         self.stats["failures"] += 1
         self.stats["degraded"] += 1
         if attempt.short_circuited:
@@ -212,7 +275,18 @@ class APIAdapter(ABC):
         return None, {
             "degraded": True, "cached": False, "attempts": attempt.attempts,
             "error": attempt.error_text, "short_circuited": attempt.short_circuited,
+            "non_retryable": attempt.non_retryable,
             "circuit": self.policy.breaker_state(),
+        }
+
+    def not_found_result(self, key: str | None, meta: dict) -> dict:
+        """把「查不到」落成统一附加字段（子类在自己的 `_not_found` 里复用）。"""
+        return {
+            "not_found": True,
+            "error": meta.get("error", ""),
+            "attempts": int(meta.get("attempts", 0)),
+            "circuit": meta.get("circuit", CIRCUIT_CLOSED),
+            "adapter": self.name,
         }
 
     def degraded_result(self, key: str | None, meta: dict) -> dict:
@@ -222,6 +296,7 @@ class APIAdapter(ABC):
             "error": meta.get("error", ""),
             "attempts": int(meta.get("attempts", 0)),
             "short_circuited": bool(meta.get("short_circuited")),
+            "non_retryable": bool(meta.get("non_retryable")),
             "circuit": meta.get("circuit", CIRCUIT_CLOSED),
             "adapter": self.name,
         }
@@ -248,8 +323,19 @@ class APIAdapter(ABC):
                 return {"adapter": self.name, "mode": "live", "live": True, "ok": False,
                         "url": self._url(test_key), "error": r.get("error", ""),
                         "attempts": r.get("attempts", 0),
+                        "non_retryable": bool(r.get("non_retryable")),
                         "circuit": r.get("circuit", CIRCUIT_CLOSED),
                         "short_circuited": bool(r.get("short_circuited"))}
+            # 404 同样不抛异常，但它**证明了** URL + 鉴权是通的（服务端读懂了请求并
+            # 明确回答「没这条记录」）。自检的目的是验配置，所以判 ok=True 并说明
+            # 测试 ID 不存在——把「测试单号不存在」报成「配置有问题」会让人白折腾。
+            if r.get("not_found"):
+                return {"adapter": self.name, "mode": "live", "live": True, "ok": True,
+                        "url": self._url(test_key), "not_found": True,
+                        "note": f"endpoint 可达且鉴权通过，但测试 ID {test_key!r} 在该系统里"
+                                f"不存在；换成真实 ID 即可看到字段映射结果",
+                        "error": r.get("error", ""),
+                        "circuit": r.get("circuit", CIRCUIT_CLOSED)}
             parsed = {k: r.get(k) for k in ("status", "stock", "carrier", "eta", "warehouse")}
             raw = r.get("raw", {}) or {}
             return {"adapter": self.name, "mode": "live", "live": True, "ok": True,
@@ -280,6 +366,8 @@ class OrderStatusAdapter(APIAdapter):
         if not self.enabled():
             return self._mock(order_id)
         data, meta = self._fetch(order_id or "?")
+        if meta.get("not_found"):
+            return self._not_found(order_id, meta)
         if meta.get("degraded"):
             return self._degraded(order_id, meta)
         return OrderStatusResponse(
@@ -287,6 +375,10 @@ class OrderStatusAdapter(APIAdapter):
             carrier=_get_path(data, self.f_carrier) or "",
             eta=_get_path(data, self.f_eta) or "", raw=data,
         ).model_dump()
+
+    def _not_found(self, order_id, meta: dict) -> dict:
+        return {**OrderStatusResponse(order_id=order_id).model_dump(),
+                **self.not_found_result(order_id, meta)}
 
     def _degraded(self, order_id, meta: dict) -> dict:
         return {**OrderStatusResponse(order_id=order_id).model_dump(),
@@ -313,6 +405,8 @@ class InventoryAdapter(APIAdapter):
         if not self.enabled():
             return self._mock(sku)
         data, meta = self._fetch(sku or "?")
+        if meta.get("not_found"):
+            return self._not_found(sku, meta)
         if meta.get("degraded"):
             return self._degraded(sku, meta)
         raw_stock = _get_path(data, self.f_stock)
@@ -320,6 +414,10 @@ class InventoryAdapter(APIAdapter):
             sku=sku, stock=int(raw_stock) if isinstance(raw_stock, (int, float)) else None,
             warehouse=_get_path(data, self.f_warehouse) or "", raw=data,
         ).model_dump()
+
+    def _not_found(self, sku, meta: dict) -> dict:
+        return {**InventoryResponse(sku=sku).model_dump(),
+                **self.not_found_result(sku, meta)}
 
     def _degraded(self, sku, meta: dict) -> dict:
         return {**InventoryResponse(sku=sku).model_dump(),
@@ -460,6 +558,7 @@ def adapter_status() -> list[dict]:
                     "base_url": a.base_url or "", "path_tpl": a.path_tpl,
                     "circuit": a.policy.breaker_state(),
                     "degraded_calls": a.stats.get("degraded", 0),
+                    "not_found_calls": a.stats.get("not_found", 0),
                     "retries": a.stats.get("retries", 0)})
     return out
 
@@ -495,6 +594,17 @@ def normalize_live(live: list[dict] | None) -> list[dict]:
                 "error": l.get("error", ""), "attempts": int(l.get("attempts", 0)),
                 "circuit": l.get("circuit", CIRCUIT_CLOSED),
                 "short_circuited": bool(l.get("short_circuited")),
+                "non_retryable": bool(l.get("non_retryable")),
+                "order_id": l.get("order_id"), "sku": l.get("sku"),
+            })
+            continue
+        # 「查不到」是**第三种终态**：后端正常、只是没有这条记录。它同样带着
+        # order_id/sku，所以必须排在订单/库存分支之前，否则会被渲染成
+        # 「订单卡片但状态为空」。也绝不能并进 degraded——那是「后端出问题」。
+        if l.get("not_found"):
+            cards.append({
+                "type": "not_found", "adapter": l.get("adapter", ""),
+                "error": l.get("error", ""), "attempts": int(l.get("attempts", 0)),
                 "order_id": l.get("order_id"), "sku": l.get("sku"),
             })
             continue
