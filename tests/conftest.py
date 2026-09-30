@@ -38,6 +38,7 @@ os.environ["KB_AUDIT_LOG"] = "off"          # 不污染审计文件
 os.environ["KB_ACTION_LOG"] = "off"         # P2-9 动作审计默认关闭；需要断言的用例自行开
 os.environ["KB_RATE_LIMIT"] = "0"
 os.environ["KB_API_TOKEN"] = ""
+os.environ["KB_ACTION_GRAPH"] = "0"         # P2-9 收尾：图谱回写默认关；需要断言的用例自行开
 
 
 @pytest.fixture

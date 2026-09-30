@@ -263,12 +263,16 @@ def list_actions() -> dict:
 
     risk 含义：read（只读）| write（改业务数据）| destructive（不可逆/涉及资金）。
     需要确认的动作（requires_confirm=true）必须以 confirmed=true 重放才会执行。
+    `graph_writeback` 表示执行成功后是否把结果回写知识图谱（`KB_ACTION_GRAPH`，
+    默认关）：开启后每次执行会多出 `graph` 字段，审计里同样多一段。
     """
+    from kb_mcp_server.action_graph import effects_enabled
     from kb_mcp_server.actions import action_tools, read_action_log
     from kb_mcp_server.agents.workers import ActionAgent
     from kb_mcp_server.extensions import agent_gate_open
 
     return {"enabled": agent_gate_open(ActionAgent()),
+            "graph_writeback": effects_enabled(),
             "actions": action_tools().list(),
             "recent": read_action_log(10)}
 
@@ -283,6 +287,11 @@ def run_action(action: str, params: dict | None = None, confirmed: bool = False,
     必须由人工确认后以 confirmed=true 重放。
     返回 status ∈ {executed, needs_confirmation, rejected}；失败不抛异常。
     每次尝试（含被拒 / 待确认）都会写入动作审计日志。
+
+    开启 `KB_ACTION_GRAPH=1` 时，**执行成功**的动作会多返回一个 `graph` 段
+    （结果已回写知识图谱：节点 key / 关系条数 / 实际后端）；图谱不可用时该段
+    变成 `applied=false` 的降级说明，**不影响动作本身的结论**。
+    需要挂到客户 / 产品上的动作，可在 params 里附带 `customer` / `sku`。
     """
     from kb_mcp_server.actions import run_action as _run
 

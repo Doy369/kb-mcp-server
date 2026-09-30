@@ -11,6 +11,12 @@
    这既是合规要求，也是「动作真的发生了」唯一可被断言的证据——
    和 P0-3 一样：只看「没报错」不足以证明副作用发生过。
 
+第 4 条（**P2-9 收尾**）也收口在这里：**执行成功后把结果回写知识图谱**
+（`action_graph.apply_action_effects`，默认关 `KB_ACTION_GRAPH=0`）。
+同样是「每新增一个动作都自动获得」的理由——否则「执行 → 关系 → 再检索」这条闭环
+会在每个新动作上重新断一次。写回失败只降级、不改动作结论（动作已经发生，
+记账失败若报成失败，会诱导调用方重试 = 第二次执行）。
+
 失败一律不抛异常，统一返回 `{"ok": False, "status": ..., "error": ...}`（沿用全项目降级约定）。
 """
 
@@ -23,6 +29,7 @@ import threading
 import time
 import uuid
 
+from kb_mcp_server.action_graph import apply_action_effects, effects_enabled
 from kb_mcp_server.config import DATA_DIR, get_cfg
 from kb_mcp_server.extensions import (
     RISK_DESTRUCTIVE,
@@ -238,7 +245,7 @@ class ActionRunner:
         return self._registry
 
     def run(self, action: str, params: dict | None = None, confirmed: bool = False,
-            actor: str = "") -> dict:
+            actor: str = "", context: dict | None = None) -> dict:
         given = dict(params or {})
         who = actor or self.actor or "anonymous"
         t = self._reg().get(action)
@@ -269,10 +276,17 @@ class ActionRunner:
         except Exception as e:  # noqa: BLE001 - 动作失败不得抛穿调用方
             return self._reject(action, given, who, f"{type(e).__name__}: {e}", risk=t.risk)
 
+        # P2-9 收尾：把执行结果回写图谱（默认关）。
+        # 放在这里而不是动作工具内部，理由与确认门/审计一样——**每新增一个动作都自动获得**，
+        # 不会漏。写失败只降级、不改结论：动作已经发生，记账失败不该让调用方重试。
+        gfx = apply_action_effects(action, given, result, context) if effects_enabled() else None
         rec = self._record(action, given, who, risk=t.risk, confirmed=confirmed, ok=True,
-                           status="executed", error="", result=result)
-        return {"ok": True, "status": "executed", "action": action, "risk": t.risk,
-                "action_id": rec["action_id"], "confirmed": confirmed, "result": result}
+                           status="executed", error="", result=result, graph_effects=gfx)
+        out = {"ok": True, "status": "executed", "action": action, "risk": t.risk,
+               "action_id": rec["action_id"], "confirmed": confirmed, "result": result}
+        if gfx is not None:
+            out["graph"] = gfx
+        return out
 
     # ---- 内部 ----
     def _reject(self, action, params, who, error, risk="", **extra) -> dict:
@@ -284,7 +298,7 @@ class ActionRunner:
         return out
 
     def _record(self, action, params, who, *, risk, confirmed, ok, status, error,
-                result=None) -> dict:
+                result=None, graph_effects=None) -> dict:
         rec = {
             "kind": "action",
             "action_id": "ACT-" + uuid.uuid4().hex[:10],
@@ -299,6 +313,9 @@ class ActionRunner:
         }
         if result is not None:
             rec["result"] = _safe_json(result)
+        if graph_effects is not None:
+            # 只在实际开启回写时出现——默认关的运行时里，审计格式与旧版完全一致
+            rec["graph"] = _safe_json(graph_effects)
         _append(rec)
         return rec
 
@@ -328,9 +345,11 @@ def action_tools() -> ActionToolRegistry:
 
 
 def run_action(action: str, params: dict | None = None, confirmed: bool = False,
-               actor: str = "") -> dict:
+               actor: str = "", context: dict | None = None) -> dict:
+    """动作唯一入口。`context` 提供图谱回写所需的旁路信息（如 `sku` / `order_id`），
+    不是动作参数，因此不进参数契约、也不参与校验（P2-9 收尾）。"""
     return ActionRunner(action_tools(), actor=actor).run(
-        action, params, confirmed=confirmed, actor=actor)
+        action, params, confirmed=confirmed, actor=actor, context=context)
 
 
 # --------------------------------------------------------------------------- #

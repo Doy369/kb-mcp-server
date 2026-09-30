@@ -183,7 +183,12 @@ class ActionAgent(BaseAgent):
 
         params = extract_params(action, ctx.question,
                                 order_id=ctx.order_id, sku=ctx.sku)
-        res = run_action(action, params, confirmed=False, actor="ActionAgent")
+        # P2-9 收尾：把提问上下文一并带上——图谱回写要用它才能把工单挂到
+        # 客户 / 产品上（`ABOUT_PRODUCT` 的取值就来自 ctx.sku）。
+        # 它是旁路信息，不是动作参数，所以进 context 而不进 params：不进参数契约、不参与校验。
+        res = run_action(action, params, confirmed=False, actor="ActionAgent",
+                         context={"sku": ctx.sku, "order_id": ctx.order_id,
+                                  "question": ctx.question})
         ctx.actions = list(ctx.actions or []) + [res]
 
         status = res.get("status", "")
