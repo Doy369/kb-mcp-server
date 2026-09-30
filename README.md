@@ -29,12 +29,13 @@
   与「后端挂了」严格区分；`/api/status` 暴露熔断状态与降级 / 查不到计数。
   **真实 HTTP 往返**已由 CI `adapters` job 每次推送验证。
 - **多 agent 协作（P7 / P1-4）**：编排器调度多个职责 agent，按问题**动态组队**（LLM 任务分解）、
-  证据不足时**多轮协商补人**、需复核时**转人工队列**；全过程留可观测轨迹。
+  子任务按 `depends_on` **依赖分层**（同层并行、层间串行）、证据不足时**双向协商补人**
+  （请求 / 应答账本，沉默不算数）、需复核时**转人工队列**；全过程留可观测轨迹。
 - **动作型工具 + 真实 MCP（P2-9）**：agent 不止会答，还能**真正执行**「建工单 / 改单 / 退款」，
   按风险分级（read / write / destructive）+ **确认门**（不可逆动作未确认绝不执行）+ 全量审计；
   MCP 侧已由真实 stdio 子进程 + 官方客户端完成协议端到端验证（CI `mcp` job）。
-- **质量保障（P2-10）**：**308 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 八 job 全绿**
-  （`CI #21` / run `36673194795`；七 job 基线：`CI #19` / run `36663136008`）
+- **质量保障（P2-10）**：**332 例 pytest 单测**（离线约 12s 跑完）+ **GitHub Actions CI 九 job 全绿**
+  （八 job 基线：`CI #21` / run `36673194795`；七 job 基线：`CI #19` / run `36663136008`）
   —— ① 单测 → 回归评测 → 基线校验（通过率低于阈值即阻断合并）；
   ② 容器镜像构建 → 启动 → 健康检查 → 容器内端到端冒烟；
   ③ 真实 Postgres + pgvector：建表 → 完整回归跑在 PG → 校验 schema 与落库数据；
@@ -117,7 +118,7 @@ kb-mcp-server/
 ├── eval_run.py             # 回归评测入口（golden 集 → 基线指标 + eval_report.json）
 ├── bench_scale.py          # 规模化召回评测（992 条公开语料，Recall/MRR/NDCG/Precision）
 ├── pytest.ini
-├── tests/                  # 自动化测试（308 例，离线零依赖，见 tests/README.md）
+├── tests/                  # 自动化测试（332 例，离线零依赖，见 tests/README.md）
 ├── scripts/
 │   ├── check_baseline.py   # CI 基线校验：通过率低于阈值则退出码 1（阈值/报告路径可覆盖）
 │   ├── check_pg.py         # CI 存储校验：schema 落库 / 数据非空（堵静默退回 memory）
@@ -125,8 +126,8 @@ kb-mcp-server/
 │   ├── check_load.py       # P2-10 补：真实 HTTP 并发压测（零错误 / 不丢数据 / 限流精确）
 │   ├── check_adapters_live.py  # P0-2 收尾：真实 HTTP 往返（真实 socket 替身后端，26 项断言）
 │   ├── check_age.py        # P2-10 补：真实 Apache AGE 图侧（扩展/建图/不降级/原始表对账）
-│   └── verify_collaboration.py  # P1-4 动态协作真实链路联调
-├── .github/workflows/ci.yml  # CI 八 job：单测+评测+基线 / 容器 / PG / MCP / 负载 / 适配器 / AGE / bge(夜间)
+│   └── verify_collaboration.py  # P1-4 动态协作真实链路联调（依赖分层 / 双向协商，28 项断言）
+├── .github/workflows/ci.yml  # CI 九 job：单测+评测+基线 / 容器 / PG / MCP / 负载 / 适配器 / 协作 / AGE / bge(夜间)
 ├── Dockerfile              # 容器镜像（默认轻量档，ARG 可选 bge / pgvector）
 ├── docker-compose.yml      # 编排：web + 数据卷 + 可选 pgvector 服务
 ├── .dockerignore
@@ -337,8 +338,28 @@ python demo_graph.py
 | 配置 | 默认 | 作用 |
 |---|---|---|
 | `KB_AGENT_PLANNER` | 跟随 `KB_AGENT_MODE`（llm 模式 → `llm`） | `llm` 时由 LLM 把问题**动态分解**为子任务、从能力清单里选人；LLM 不可达 / 输出非法一律回退确定性规划 |
-| `KB_AGENT_MAX_ROUNDS` | `1` | `>1` 启用**证据协商**：worker 产出后由 `EvidenceCritic` 评估证据缺口，点名补查缺失能力的 agent（只提未执行过的能力，必然收敛） |
+| `KB_AGENT_MAX_ROUNDS` | `1` | `>1` 启用**双向协商**：worker 产出后由 `EvidenceCritic` 评估证据缺口，向缺失能力的 agent **发出请求**；对方必须应答 `provided` / `declined` / `unavailable`——**沉默不算数**。只提「未执行过且未被拒」的能力，必然收敛 |
 | `KB_AGENT_HITL` | `0` | `1` 时护栏判定「需人工复核」的答复带 `pending_human=true`，供上层挂起等待人工放行 |
+
+**子任务依赖编排**（P1-4 收尾）：`Subtask.depends_on` 不再是预留字段，真的被消费——
+一轮内按依赖**分层**，同层并行、层间串行。三条边界写死在 `_dep_layers`：
+
+- **无依赖 → 恰好一层，且顺序 = 计划顺序**。所以默认（确定性规划器不产出依赖）行为与旧版**逐字等价**。
+- 依赖指向**本轮之外**（已执行过 / 不在计划里）视为**已满足**，不等待、不报错。
+- **成环不重排、不卡死**：降级成一层照跑，并在该轮记 `dep_cycles`——「顺序略有偏差」远好于「卡住」。
+
+**双向消息协商**（P1-4 收尾）：不再只有「评审点名」这一个方向。worker 也能在 `on_run` 里
+**主动委托**（`BaseAgent.request_help` → 对方 `reply_to`），评审缺口则登记为同一本账上的请求。
+账本 `AgentContext.negotiation` 是 **append-only** 的，四种结局都能被追问：
+
+| 结局 | 含义 |
+|---|---|
+| `provided` | 被点名方跑完确实产出了该能力的新证据 |
+| `declined` | 跑完了但没有证据——**明确说「我也没有」**，不是含糊放过 |
+| `unavailable` | 共同体里没人具备该能力 / 本应服务者已执行过 → 当场关账 |
+| 悬空请求 | **不允许存在**：轮次结束仍无人应答的请求一律由编排器关账 |
+
+被拒 / 无主的能力进「**别再提**」名单（`declined`），既不重复索要，也让「为什么没补轮」可解释。
 
 协作过程落在返回的 `collaboration` 段（每轮分工 / 子任务理由 / 协商结论），例如：
 
@@ -349,9 +370,24 @@ python demo_graph.py
   第2轮 [negotiation] LiveData
 ```
 
+真发生协商时另带一段账本摘要（未协商则不出现，不给轨迹添噪音）：
+
+```json
+"negotiation": {
+  "requests": 1, "replies": 1, "declined": [], "delegated": false,
+  "ledger": [
+    {"kind": "request", "id": "req-1", "by": "EvidenceCritic", "capability": "live", "ask": "..."},
+    {"kind": "reply",   "id": "req-1", "by": "LiveData", "status": "provided", "note": "已产出该项证据"}
+  ]
+}
+```
+
+`delegated=true` 表示这轮补人是 **worker 自己提的**（而非评审），补轮来源相应记为 `delegation`。
+
 设计取舍：**LLM 只用在「任务分解」上**（这一步真的需要语义理解），
 「证据够不够」这类判定用确定性规则——可解释、零额外 token、离线可测。
 两条降级路径都保证「开启协作不会比不开更脆弱」。
+`declined` 名单同理是**确定性规则**：把「谁被问过、谁拒绝了」变成可解释的状态，而不是再问一次模型。
 
 ### 轨迹即可观测性
 
@@ -394,7 +430,7 @@ $ python scripts/check_mcp.py     # 真实 stdio 子进程 + 官方 MCP 客户�
 
 ```bash
 python demo_agents.py                  # 固定流水线协作（只入向量库 → 自动补图 → 多路召回 → 合成）
-python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 协商补轮 / 降级 / 人工介入
+python scripts/verify_collaboration.py # P1-4 动态协作：任务分解 / 依赖分层 / 双向协商 / 降级 / 人工介入（28 项断言）
 python scripts/check_mcp.py            # P2-9 真实 MCP 协议端到端（握手 / 工具 / 动作确认门 / 审计 / 多 agent）
 python scripts/check_load.py           # P2-10 补：真实 HTTP 并发压测（会临时起 app 子进程）
 python scripts/check_age.py            # P2-10 补：真实 Apache AGE 图侧（需目标 PG 带 age 扩展）
@@ -467,6 +503,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 | `KB_API_CIRCUIT_BREAKER` | `1` | 熔断开关；开路期不再发起调用 |
 | `KB_API_CIRCUIT_THRESHOLD` | `5` | 连续失败多少次后开路 |
 | `KB_API_CIRCUIT_COOLDOWN` | `30` | 开路冷却秒数，之后放半开探测 |
+| `KB_AGENT_MAX_ROUNDS` | `1` | `>1` 启用双向协商补轮（`Subtask.depends_on` 依赖分层**无需开关**，默认行为与旧版等价） |
 | `KB_AGENT_ACTIONS` | `0` | `1` 时 ActionAgent 参与编排（不可逆动作仍只停在待确认） |
 | `KB_ACTION_LOG` | `kb_actions.jsonl` | 动作审计日志路径（`off`=不落盘） |
 
@@ -531,7 +568,7 @@ docker build --build-arg ENABLE_PGVECTOR=true -t kb-mcp-server:pg  .   # pgvecto
 
 ```bash
 pip install pytest
-python -m pytest tests/ -v      # 308 例，离线约 12s
+python -m pytest tests/ -v      # 332 例，离线约 12s
 ```
 
 覆盖范围（全部零外部依赖，dev 嵌入 + memory 后端）：
@@ -543,7 +580,7 @@ python -m pytest tests/ -v      # 308 例，离线约 12s
 | `test_eval_guardrail.py` | 36 | **数字边界断言**（防假通过）、证据段剔除、禁止词反向断言、护栏分级、审计容错 |
 | `test_agents_mcp.py` | 24 | Agent 异常兜底、黑板隔离、路由裁剪、**降级链路**、合成契约、16 工具注册完整性 |
 | `test_adapters_resilience.py` | 51 | 重试次数语义与指数退避封顶、熔断状态机、降级不抛异常、失败不写缓存、**可重试性分级**（4xx 不重试 / 不计熔断）、**`not_found` 终态**与 `HTTPStatusError` 转换 |
-| `test_planner_collaboration.py` | 48 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关 |
+| `test_planner_collaboration.py` | 72 | 动态任务分解的四条降级回退、协商只提未执行能力、多轮补轮不重复执行、HITL 开关；**P1-4 收尾**：依赖分层（无依赖单层等价旧行为 / 跨层串行 / 轮外依赖视为满足 / 自依赖忽略 / 成环降级不卡死）、`depends_on` 解析（悬空 / 自依赖 / 能力别名都要安全丢弃）、协商账本（唯一 id / 空账本不出现）、双向协商（worker 委托 / 沉默不算数 / 无主请求关账 / 已执行不重跑） |
 | `test_actions.py` | 53 | 动作参数契约、**确认门**、审计三终态、意图识别与参数抽取、参与闸门、HITL 闭环 |
 | `test_baseline_gate.py` | 11 | **基线校验脚本本身**：阈值覆盖、报告路径三来源、恰好等于阈值放行、低于必红、缺失必失败 |
 | `test_graph_age_cypher.py` | 15 | **AGE `cypher()` 两条硬约束**：① 列定义列表列数必须等于 `RETURN` 表达式数；② 图名与 Cypher 原文必须是**常量字面量**（内联 + 美元引用，不得出现 `$1/$2`）。假连接抓 SQL 断言，**不需要真实 PG** |
@@ -564,7 +601,7 @@ python -m pytest tests/ -v      # 308 例，离线约 12s
 
 ### CI 流水线
 
-`.github/workflows/ci.yml` 八个 job：
+`.github/workflows/ci.yml` 九个 job：
 
 | job | 触发 | 内容 | 验证什么 |
 |---|---|---|---|
@@ -574,10 +611,11 @@ python -m pytest tests/ -v      # 308 例，离线约 12s
 | `mcp` | 推送 / PR | stdio 子进程 + 官方客户端走完整 JSON-RPC | MCP 是**协议实质**而非标题；动作确认门与审计真落盘 |
 | `load` | 推送 / PR | 真实 HTTP 并发压测（只读 / 混合读写 / 限流门 / 指标自洽） | 并发下**不丢数据、限流精确、零错误** |
 | `adapters` | 推送 / PR | 起**真实 socket + 真实 HTTP 协议**的本地替身后端，让真实 `urllib` 适配器打过去（26 项断言）+ 真实 app 子进程端到端 | 出站适配层**真能完成一次 HTTP 往返**：重试计数 / 超时受约束 / 熔断后请求数冻结 / 404 与 401 不重试 / 429 重试 |
+| `collab` | 推送 / PR | `scripts/verify_collaboration.py`：真实 worker 链路（只把 LLM 换替身）走 7 个场景、28 项断言 | 协作**轨迹结构**真对：依赖真分层 / 补轮真来源 / 账本真关账 / 沉默真不算数（不是「脚本跑完没报错」） |
 | `age` | 推送 / PR | 官方 `apache/age` 容器 → 扩展 → 建图 → **AGE 语法能力探针**（含多列 `RETURN` 列数契约）→ 真实摄取写入 → 原始表对账 | 图侧真跑，且 `get_graph_store()` **没有静默降级**成 memory 图 |
 | `bge` | **夜间 03:00 + 手动** | 真实 bge 嵌入回归（阈值 **0.95**） | 质量**上限**；缓存 1.3GB 模型，不拖慢每次推送 |
 
-评测报告作为 artifact 归档 30 天；`load` / `adapters` / `age` 的报告同样归档。
+评测报告作为 artifact 归档 30 天；`load` / `adapters` / `collab` / `age` 的报告同样归档。
 
 七 job 基线实测：**`CI #19` / run `36663136008`，全绿**（`bge` 按 schedule 跳过属正常）；
 后新增 `adapters` job（真实 HTTP 往返）成八 job，**`CI #21` / run `36673194795` 八 job 全绿**。
